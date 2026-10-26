@@ -33,6 +33,7 @@ const MIN_SESSION_WH = 1000, MIN_SESSION_S = 1800; // cloudy-day start needs thi
 const REST_S = 20 * 60;    // after our own stop, wait this long before starting again...
 const REST_EXPORT_TICKS = 5; // ...unless exporting >= min amps + margin this many ticks in a row
 const SMOOTH_TICKS = 3, AMPS_STEP = 2;
+const SWAP_MIN_WH = 1000; // excess solar left today worth swapping cars for (same as the advisor's min session)
 
 export class Controller {
   constructor(collector, tesla, advisor) {
@@ -382,8 +383,40 @@ export class Controller {
     } else {
       title = `${carTag(car)}EV charging stopped`;
       body = `Stopped by ${who}. Car battery ${car.battery ?? '?'}%.${added}`;
+      if (car.state === 'Complete') body += this.swapAdvice(now, car);
     }
     await notify({ kind: car.charging ? 'EV_STARTED' : 'EV_STOPPED', title, body, priority: 3, tags: ['red_car', car.charging ? 'electric_plug' : 'no_entry'] });
+  }
+
+  // Two cars: when one finishes, is there enough excess solar left today to make swapping in the other worth it?
+  // Forecast spare solar (with the EV safety factor) after the house battery's remaining need, counting only
+  // 15-min steps where it's at least min amps. The other car's SOC/limit are its last bridge readings.
+  swapAdvice(now, car) {
+    const other = config.tesla.cars.find((c) => c.key !== car.car);
+    const { plan } = this.plan(now);
+    if (!other || !plan || !plan.ok || !plan.steps) return '';
+    const ahead = plan.steps.filter((st) => st.ts + 900 > now);
+    if (!ahead.some((st) => st.pv > st.load)) return ''; // no solar left today: nothing to decide
+    const volts = car.voltage > 180 ? car.voltage : 240;
+    let batteryRoom = Math.max(0, ((config.ev.targetSoc - plan.soc) / 100) * plan.capacityWh);
+    let wh = 0, until = null;
+    for (const st of ahead) {
+      const h = (st.ts + 900 - Math.max(now, st.ts)) / 3600;
+      let spare = Math.max(0, st.pv * config.ev.safety - st.load) * h;
+      const toBattery = Math.min(batteryRoom, spare);
+      batteryRoom -= toBattery; spare -= toBattery;
+      if (spare / h >= config.ev.minAmps * volts) { wh += spare; until = st.ts + 900; }
+    }
+    const last = db.prepare('SELECT battery, charge_limit FROM ev_samples WHERE car = ? AND battery IS NOT NULL ORDER BY ts DESC LIMIT 1').get(other.key);
+    const seen = last ? ` (last seen ${last.battery}%${last.charge_limit != null ? `, limit ${last.charge_limit}%` : ''})` : '';
+    if (last && last.charge_limit != null && ((last.charge_limit - last.battery) / 100) * other.kwh * 1000 < SWAP_MIN_WH) {
+      return ` No swap: ${other.name} is at or near its limit${seen}.`;
+    }
+    if (wh < SWAP_MIN_WH) {
+      return wh < 100 ? ' No swap: no excess solar left for a car today.' : ` No swap: only ~${(wh / 1000).toFixed(1)} kWh of excess solar left today.`;
+    }
+    return ` Swap: plug in ${other.name}${seen}, ~${(wh / 1000).toFixed(1)} kWh of excess solar left until ~${clock(until)}.`
+      + ` Unplug ${car.carName || 'this car'} first: the bridge stays with whichever car is plugged in.`;
   }
 
   // Car SOC at the end of today's planned solar window: plan energy left x charging efficiency, capped at the car's limit.
