@@ -134,6 +134,20 @@ const carLabel = (m) => {
   if (c.charging) return 'car charging';
   return carRoom.has(m) ? 'car plugged, idle with room' : 'car plugged, at limit';
 };
+// Controller decisions (control_log, one per tick) inside a window: most common reasons first, digits ignored
+// when grouping so "Cloudy: 2/5 ..." and "Cloudy: 3/5 ..." count together; the latest wording is kept.
+const controlRows = db.prepare('SELECT ts, reason FROM control_log WHERE ts >= ? AND ts < ? ORDER BY ts').all(d0, d1);
+const controlReasons = (a, b) => {
+  const groups = new Map();
+  for (const r of controlRows) {
+    if (r.ts < a || r.ts >= b || !r.reason) continue;
+    const key = r.reason.replace(/[\d.]+/g, '#');
+    const g = groups.get(key) || { reason: r.reason, ticks: 0 };
+    g.reason = r.reason; g.ticks++;
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((x, y) => y.ticks - x.ticks).slice(0, 3);
+};
 const exportWindows = [];
 let exportBlipWh = 0;
 {
@@ -145,7 +159,7 @@ let exportBlipWh = 0;
     const car = Object.entries(w.car).sort((a, b) => b[1] - a[1])[0][0];
     exportWindows.push({ start: w.start, end: w.end + 60, wh, avgExportW: Math.round((w.wh * 60) / w.n),
       avgExcessW: Math.round(w.excess / w.n), soc: [w.soc0, w.soc1], car,
-      carBattery: w.carBatt, carLimit: w.carLim });
+      carBattery: w.carBatt, carLimit: w.carLim, control: controlReasons(w.start, w.end + 60) });
     w = null;
   };
   for (const x of daylight) {
@@ -239,6 +253,7 @@ console.log(`export windows (${exportBlipWh} Wh more in blips under ${EXPORT_MIN
 for (const w of exportWindows) {
   const car = w.carBattery != null ? `${w.car} ${w.carBattery}%/${w.carLimit ?? '?'}%` : w.car;
   console.log(`  ${fmtT(w.start)}-${fmtT(w.end)} ${w.wh} Wh (avg ${w.avgExportW} W out, ${w.avgExcessW} W excess)  house ${w.soc[0]}-${w.soc[1]}%  ${car}`);
+  for (const c of w.control) console.log(`      controller x${c.ticks}: ${c.reason}`);
 }
 console.log(`grid leakage ${leakage.wh} Wh (spikes ${leakage.spikeWh} Wh over ${leakage.spikeSeconds} s, bias ${leakage.biasWh} Wh, max ${leakage.maxW} W)`
   + `, night ${leakage.nightPct ?? '-'}% of house use  [${Math.round(leakage.seconds / 36) / 100} h of gateway data]`);

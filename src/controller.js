@@ -13,7 +13,7 @@
 // exporting enough for min amps REST_EXPORT_TICKS minutes running; amps follow a 3-tick average and
 // only change by AMPS_STEP or more (cuts for grid import and raises into clear export apply at once).
 import { config } from './config.js';
-import { db, writeNotification } from './db.js';
+import { db, writeNotification, writeControlLog } from './db.js';
 import { notify } from './notify.js';
 import { log } from './log.js';
 
@@ -84,7 +84,12 @@ export class Controller {
   }
 
   async tick() {
-    try { await this.step(); } finally { this.persist(); }
+    try { await this.step(); } finally {
+      this.persist();
+      if (this.status.at) {
+        try { writeControlLog(this.status.at, this.status, this.tesla.live()); } catch (e) { log.warn('control', `decision log: ${e.message}`); }
+      }
+    }
   }
 
   async step() {
@@ -222,7 +227,15 @@ export class Controller {
       if (next > 0 && this.startCount >= START_TICKS) return this.command(now, car, next, why, info);
     } else {
       this.stopCount = next === 0 ? this.stopCount + 1 : 0;
-      if (next === 0 && this.stopCount >= STOP_TICKS) return this.command(now, car, 0, `${mode}: excess ${(excessW / 1000).toFixed(1)} kW is below ${config.ev.minAmps} A`, info);
+      if (next === 0 && this.stopCount >= STOP_TICKS) {
+        // Say what actually made the target zero: the plan holding solar for the house battery, or too little power.
+        const kw = `${(excessW / 1000).toFixed(1)} kW excess`;
+        const b = plan && plan.best;
+        const why = planSaysNo
+          ? `plan: house battery first (${plan && plan.reason ? plan.reason : b && b.startTs > now ? `next car window ~${clock(b.startTs)}` : 'no car window left today'}), ${kw}`
+          : `${mode}: target ${Math.round(targetW)} W is below ${config.ev.minAmps} A (${Math.round(minW)} W), ${kw}`;
+        return this.command(now, car, 0, why, info);
+      }
       if (next > 0) {
         // Steadier amps: follow the recent average and ignore 1 A wiggles. Cutting for grid import is immediate.
         this.targets = [...this.targets, next].slice(-SMOOTH_TICKS);
