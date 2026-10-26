@@ -147,4 +147,4 @@ if ($Mode -eq 'docker') {
 }
 Write-Host "`nDashboard: http://localhost:$(if (GetEnv PORT) { GetEnv PORT } else { '8787' })"
 if ((GetEnv NOTIFY) -eq '1') { Write-Host 'Push notifications: install the ntfy app and subscribe to the topic shown on the EV tab.' }
-Write-Host 'Keep this PC awake (Settings > System > Power > Sleep: Never) for per-second monitoring.'
+Write-Host 'Keep this PC awake and on the network 24/7 (Settings > System > Power > Sleep when plugged in: Never). Monitoring and Tesla control stop while it sleeps; a laptop should stay plugged in with lid close set to Do nothing. See README > Keep the computer awake.'

@@ -7,7 +7,7 @@ API, no cloud subscriptions.
 **Independent open-source project. Not affiliated with, endorsed by or supported by Enphase Energy
 or Tesla.** Read [Safety, liability and trademarks](#safety-liability-and-trademarks) before you use it.
 
-**Core (everything you need is an Enphase system and a computer):**
+**Core (everything you need is an Enphase system and an always-on computer on your home network):**
 
 - **Live dashboard** updated every second: solar, house, IQ Battery, grid, per-phase meters,
   microinverters, battery units.
@@ -51,7 +51,7 @@ websites, so turning this on is your decision and may put your Enlighten account
 | Item | Notes |
 | --- | --- |
 | Enphase IQ Gateway with consumption CTs | Your Enlighten login, to get a local gateway token once a year (or paste a token) |
-| Always-on computer on the same network | Windows, macOS, Linux or Raspberry Pi. Node 24+ or Docker |
+| Always-on computer on the same network | Windows, macOS, Linux or Raspberry Pi. Node 24+ or Docker. Wi-Fi or Ethernet on the same LAN as the gateway (and the NanoC6). Must stay awake 24/7, see [Keep the computer awake](#keep-the-computer-awake) |
 | *Tesla control only:* [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) | ~$10, USB powered, within Bluetooth range of where the car parks, plus a USB-C data cable to flash it |
 | *Tesla control only:* a Tesla on a charger it controls | Tested: Model 3 on a Mobile Connector, 240 V, 5–32 A |
 
@@ -66,6 +66,7 @@ websites, so turning this on is your decision and may put your Enlighten account
    - **Windows**: `powershell -ExecutionPolicy Bypass -File install.ps1`
    - **macOS / Linux / Pi**: `./install.sh`
 3. Open http://localhost:8787.
+4. Keep the computer awake: see below.
 
 The installer asks, in order:
 
@@ -82,6 +83,28 @@ The installer asks, in order:
 
 Re-running the installer keeps existing values, so it is also how you turn features on later.
 Everything it writes (`.env`, `esphome/secrets.yaml`, `data/`) is git-ignored.
+
+### Keep the computer awake
+
+The app only works while the computer is running and on the network. When it sleeps, nothing is
+recorded (the dashboard and history show a gap), the EV advisor and push notifications stop, and Tesla
+control stops: a car that is charging keeps going at its last amps, and the night top-off cap isn't
+enforced. Locking the screen or turning the display off is fine. Sleep is not.
+
+- **Windows**: Settings > System > Power > Screen and sleep: "When plugged in, put my device to
+  sleep after: Never". Most PCs with Modern Standby freeze desktop apps while asleep, even though
+  Wi-Fi stays connected.
+- **Laptop**: keep it plugged in (on battery it sleeps on its own timer) and set closing the lid to
+  do nothing when plugged in. Windows: Control Panel > Power Options > Choose what closing the lid
+  does, or `powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0` then
+  `powercfg /setactive SCHEME_CURRENT`. macOS: `sudo pmset -c sleep 0` (a closed MacBook lid still
+  sleeps without an external display).
+- **Linux / Raspberry Pi**: disable suspend (for example
+  `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`).
+- Prefer Ethernet or a reliable Wi-Fi spot: the gateway and the NanoC6 are reached over the LAN.
+
+On Windows the `EnphaseLive` task restarts the app within 5 minutes of waking or logging on. Time
+spent asleep is not recovered at 1 s (with `ENLIGHTEN_CLOUD=1` the 15-min cloud history fills it in).
 
 ### Manual setup
 
