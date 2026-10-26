@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS ev_samples (
   amps_set REAL, current REAL, voltage REAL, power_w REAL,   -- setpoint A, actual A, V, W
   battery REAL, charge_limit REAL, energy_added REAL, plugged INTEGER, asleep INTEGER, rssi REAL
 );
+
+-- EV controller decision each tick (reason it gave and the numbers behind it), for reviewing exports.
+CREATE TABLE IF NOT EXISTS control_log (
+  ts INTEGER PRIMARY KEY, car TEXT, active INTEGER, reason TEXT, mode TEXT,
+  excess_w INTEGER, export_w INTEGER, import_w INTEGER, soc INTEGER, target_w INTEGER,
+  amps INTEGER, charging INTEGER
+);
 `);
 
 // Columns added after first release.
@@ -151,6 +158,13 @@ export function writeWeather(rows) {
 const insNote = db.prepare(`INSERT INTO notifications (ts, kind, title, body, amps, sent, error) VALUES (?,?,?,?,?,?,?)`);
 export function writeNotification(n) {
   insNote.run(n.ts, n.kind, n.title, n.body, n.amps ?? null, n.sent ? 1 : 0, n.error ?? null);
+}
+const insControl = db.prepare(`INSERT OR REPLACE INTO control_log
+  (ts, car, active, reason, mode, excess_w, export_w, import_w, soc, target_w, amps, charging) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+export function writeControlLog(ts, s, car) {
+  const n = (v) => (typeof v === 'number' ? Math.round(v) : null);
+  insControl.run(ts, s.car ?? null, s.active ? 1 : 0, s.reason ?? null, s.mode ?? null, n(s.excessW), n(s.exportW), n(s.importW),
+    n(s.soc), n(s.targetW), car ? n(car.ampsSet) : null, car && car.charging != null ? (car.charging ? 1 : 0) : null);
 }
 const insEv = db.prepare(`INSERT OR REPLACE INTO ev_samples
   (ts, charging, state, amps_set, current, voltage, power_w, battery, charge_limit, energy_added, plugged, asleep, rssi, car, port_open)
@@ -226,7 +240,7 @@ export function syncLocalIntervals(fromSec) {
 // Drop per-second rows older than cutoff (RECORD_HISTORY off). Minute rollups and leakage stay.
 export function pruneDetail(cutoffSec) {
   let n = 0;
-  for (const t of ['samples', 'meter_readings', 'battery_units', 'inverters', 'ev_samples']) { // inverter_15m is kept
+  for (const t of ['samples', 'meter_readings', 'battery_units', 'inverters', 'ev_samples', 'control_log']) { // inverter_15m is kept
     n += Number(db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(cutoffSec).changes);
   }
   return n;
