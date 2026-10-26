@@ -120,4 +120,5 @@ else
 fi
 echo; echo "Dashboard: http://localhost:$(v=$(get_env PORT); echo "${v:-8787}")"
 [ "$(get_env NOTIFY)" = 1 ] && echo "Push notifications: install the ntfy app and subscribe to the topic shown on the EV tab."
+echo "Keep this computer awake and on the network 24/7 (no sleep/suspend): monitoring and Tesla control stop while it sleeps. See README > Keep the computer awake."
 true
