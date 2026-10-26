@@ -76,7 +76,7 @@ The installer asks, in order:
 4. **Phone push notifications?** Default no. If yes, install the ntfy app and subscribe to the topic
    shown on the EV tab.
 5. **Tesla control?** Default no. Answer yes only if you have a NanoC6. It writes
-   `esphome/secrets.yaml` (Wi-Fi, VIN, car Bluetooth MAC, generated passwords), can flash the
+   `esphome/secrets.yaml` (Wi-Fi, VIN, generated passwords), can flash the
    NanoC6 over USB, and stores the bridge IP. Then follow [Pairing the car](#pairing-the-car).
 6. **Start**: `docker compose up -d`, or `npm ci` + start at logon on Windows.
 
@@ -106,13 +106,16 @@ restart the `EnphaseLive` scheduled task on Windows).
 Only for Tesla control. You need the NanoC6 flashed by the installer.
 
 1. Flash the NanoC6 (installer Tesla step, or `esphome run esphome/tesla-ble.yaml --device COM3`).
-2. Car Bluetooth MAC: the car advertises as `S` + first 16 hex chars of `sha1(VIN)` + `C`. Any BLE
-   scanner app shows its MAC next to that name.
-3. Plug the NanoC6 into USB power near the car. Line of sight to the driver-side door pillar helps;
-   better than −85 dBm is reliable.
-4. Sit in the car, open `http://<bridge-ip>/` (user/password from `.env`), press **Pair BLE Key**,
-   tap your key card on the console and confirm on the car screen.
-5. The EV tab now shows the car's real amps, battery % and charge limit.
+   You only give it the car's VIN. The bridge works out the car's Bluetooth address itself from the
+   VIN (the car advertises as `S` + first 16 hex chars of `sha1(VIN)` + `C`), so no MAC is needed.
+2. Plug the NanoC6 into USB power near where the car parks. Better than −75 dBm is solid, −85 dBm is
+   the limit; move it if pairing times out.
+3. Run the guided pairing (the installer offers it): `node --env-file=.env scripts/pair-tesla.js`.
+   Sit in the car with your key card. The script finds the car, presses **Pair BLE Key**, then tells
+   you to tap the card on the console reader and confirm on the car screen. The car shows no prompt
+   until the card is tapped. If the bridge still says pairing is required, the script restarts it.
+   With a second car it walks you through that one too.
+4. The EV tab now shows the car's real amps, battery % and charge limit.
 
 The bridge pairs as a **charging-only key** (`role: CHARGING_MANAGER` in `esphome/tesla-ble.yaml`).
 The car only lets it start/stop charging, set amps and the charge limit, and open the charge port.
@@ -138,11 +141,11 @@ One NanoC6 can serve two Teslas that share a charger. The bridge talks to one ca
 
 Setup:
 
-1. Set `TESLA_CAR2_NAME` (and `TESLA_CAR1_NAME`) in `.env`, and `tesla_vin_2` / `ble_mac_address_2`
-   in `esphome/secrets.yaml` (the installer asks).
+1. Set `TESLA_CAR2_NAME` (and `TESLA_CAR1_NAME`) in `.env`, and `tesla_vin_2` in
+   `esphome/secrets.yaml` (the installer asks for the VIN).
 2. Flash the bridge: `esphome run esphome/tesla-ble.yaml`.
-3. On the bridge page, set **Active Car** to Car 2, sit in that car, press **Pair BLE Key** and tap
-   its key card. The same key is now paired with both cars.
+3. Pair car 2: `node --env-file=.env scripts/pair-tesla.js 2`, sitting in that car with the key card.
+   The same key is now paired with both cars.
 
 ## How the car control works
 

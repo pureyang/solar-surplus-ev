@@ -8,14 +8,24 @@
 
 substitutions:
   tesla_ble_ref: v2026.10.2
-  ble_mac_address: !secret ble_mac_address
   tesla_vin: !secret tesla_vin
-  ble_mac_address_2: !secret ble_mac_address_2
   tesla_vin_2: !secret tesla_vin_2
+  # No MAC settings: the bridge finds each car's Bluetooth address from its VIN (see esp32_ble_tracker below).
+  ble_mac_address: "00:00:00:00:00:00"
+  ble_mac_address_2: "00:00:00:00:00:00"
 
 esphome:
   name: tesla-ble
   friendly_name: Tesla BLE
+  includes:
+    - tesla_discover.h
+  on_boot:
+    then:
+      - lambda: |-
+          discover::init("${tesla_vin}", "${tesla_vin_2}");
+          // Use the MAC found on an earlier boot for the active car (0 until it has been seen once).
+          const uint64_t addr = id(active_car).current_option() == "Car 2" ? id(mac_car2) : id(mac_car1);
+          if (addr) id(ble_tesla_id)->set_address(addr);
 
 packages:
   tesla: github://yoziru/esphome-tesla-ble/tesla-ble-m5stack-nanoc6.dashboard.yml@v2026.10.2
@@ -27,6 +37,41 @@ packages:
 # limit, and open the charge port. The car enforces this. Changing it needs a re-pair (README).
 tesla_ble_vehicle:
   role: CHARGING_MANAGER
+
+# Bluetooth MACs found from the VINs, kept across reboots.
+globals:
+  - {id: mac_car1, type: uint64_t, restore_value: true, initial_value: "0"}
+  - {id: mac_car2, type: uint64_t, restore_value: true, initial_value: "0"}
+
+# Every advertisement: a Tesla's name is derived from its VIN, so the first time a configured car is heard
+# its MAC is stored and, if it is the active car, used right away.
+esp32_ble_tracker:
+  on_ble_advertise:
+    - lambda: |-
+        for (int i = 0; i < 2; i++) {
+          if (discover::name[i].empty() || x.get_name() != discover::name[i]) continue;
+          const uint64_t addr = x.address_uint64();
+          uint64_t &saved = i ? id(mac_car2) : id(mac_car1);
+          if (saved == addr) return;
+          saved = addr;
+          ESP_LOGI("car", "Found Car %d: %s", i + 1, discover::mac_str(addr).c_str());
+          if ((id(active_car).current_option() == "Car 2") == (i == 1)) {
+            id(ble_tesla_id)->set_address(addr);
+            id(ble_tesla_id)->disconnect();
+          }
+        }
+
+text_sensor:
+  - platform: template
+    name: "Car 1 Address"
+    entity_category: diagnostic
+    lambda: 'return id(mac_car1) ? discover::mac_str(id(mac_car1)) : std::string("searching");'
+    update_interval: 5s
+  - platform: template
+    name: "Car 2 Address"
+    entity_category: diagnostic
+    lambda: 'return id(mac_car2) ? discover::mac_str(id(mac_car2)) : std::string("searching");'
+    update_interval: 5s
 
 # Two cars, one bridge: "Active Car" swaps the VIN and Bluetooth address and reconnects. The same key
 # is paired with each car (select the car, then Pair BLE Key in it). Solar Surplus EV switches cars on
@@ -44,16 +89,12 @@ select:
       - lambda: |-
           const bool second = x == "Car 2";
           const std::string vin = second ? "${tesla_vin_2}" : "${tesla_vin}";
-          const std::string mac = second ? "${ble_mac_address_2}" : "${ble_mac_address}";
           if (vin.size() != 17) { ESP_LOGW("car", "%s has no VIN configured", x.c_str()); return; }
-          uint64_t addr = 0;
-          for (char c : mac) {
-            int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-            if (v >= 0) addr = (addr << 4) | v;
-          }
-          ESP_LOGI("car", "Active car: %s (%s)", x.c_str(), mac.c_str());
+          const uint64_t addr = second ? id(mac_car2) : id(mac_car1);
+          ESP_LOGI("car", "Active car: %s (%s)", x.c_str(), addr ? discover::mac_str(addr).c_str() : "searching");
           id(tesla_ble_vehicle_id)->set_vin(vin.c_str());
-          id(ble_tesla_id)->set_address(addr);
+          // Unknown MAC: the advertisement lambda above sets it as soon as the car is heard.
+          if (addr) id(ble_tesla_id)->set_address(addr);
           id(ble_tesla_id)->disconnect();
 
 wifi:

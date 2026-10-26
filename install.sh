@@ -62,12 +62,12 @@ echo "Skip this if you only want Enphase monitoring."
 if [ "$(ask 'Set up Tesla control? (y/N)' "$([ -n "$(get_env TESLA_BLE_HOST)" ] && echo y || echo n)")" = y ]; then
   [ -n "$(get_env TESLA_BLE_USER)" ] || set_env TESLA_BLE_USER enphase
   [ -n "$(get_env TESLA_BLE_PASSWORD)" ] || set_env TESLA_BLE_PASSWORD "$(token)"
-  set_env TESLA_CAR1_NAME "$(ask 'Name for this car (shown in messages)' "$(v=$(get_env TESLA_CAR1_NAME); echo "${v:-Car 1}")")"
-  set_env EV_CAR_KWH "$(ask 'Car usable battery size, kWh' "$(v=$(get_env EV_CAR_KWH); echo "${v:-75}")")"
+  # Only the VIN is needed per car; the bridge finds the Bluetooth address from it. Name and kWh default (edit .env later).
+  [ -n "$(get_env TESLA_CAR1_NAME)" ] || set_env TESLA_CAR1_NAME 'Car 1'
+  [ -n "$(get_env EV_CAR_KWH)" ] || set_env EV_CAR_KWH 75
   if [ ! -f esphome/secrets.yaml ]; then
     ssid=$(ask 'Wi-Fi name (2.4 GHz) for the bridge'); wpass=$(ask_secret 'Wi-Fi password')
     vin=$(ask 'Car VIN (17 characters)' | tr a-z A-Z)
-    mac=$(ask 'Car Bluetooth MAC (blank = find later)' '00:00:00:00:00:00')
     cat > esphome/secrets.yaml <<EOF
 wifi_ssid: "$ssid"
 wifi_password: "$wpass"
@@ -75,20 +75,22 @@ wifi_hotspot_password: "$(token 12)"
 api_encryption_key: "$(head -c 32 /dev/urandom | base64)"
 web_username: "$(get_env TESLA_BLE_USER)"
 web_password: "$(get_env TESLA_BLE_PASSWORD)"
-ble_mac_address: "$mac"
 tesla_vin: "$vin"
+tesla_vin_2: ""
 EOF
     echo "Wrote esphome/secrets.yaml (git-ignored)"
   fi
   # Optional second car on the same bridge: the app switches between them (README "Two cars").
   if [ "$(ask 'Second Tesla charging at this home, same bridge? (y/N)' "$([ -n "$(get_env TESLA_CAR2_NAME)" ] && echo y || echo n)")" = y ]; then
-    set_env TESLA_CAR2_NAME "$(ask 'Name for the second car' "$(v=$(get_env TESLA_CAR2_NAME); echo "${v:-Car 2}")")"
-    set_env EV_CAR2_KWH "$(ask 'Second car usable battery size, kWh' "$(v=$(get_env EV_CAR2_KWH); echo "${v:-75}")")"
-    vin2=$(ask 'Second car VIN (17 characters)' | tr a-z A-Z); mac2=$(ask 'Second car Bluetooth MAC (AA:BB:CC:DD:EE:FF)')
-    grep -vE '^(tesla_vin_2|ble_mac_address_2):' esphome/secrets.yaml > esphome/secrets.yaml.tmp && mv esphome/secrets.yaml.tmp esphome/secrets.yaml
-    printf 'ble_mac_address_2: "%s"\ntesla_vin_2: "%s"\n' "$mac2" "$vin2" >> esphome/secrets.yaml
+    [ -n "$(get_env TESLA_CAR2_NAME)" ] || set_env TESLA_CAR2_NAME 'Car 2'
+    [ -n "$(get_env EV_CAR2_KWH)" ] || set_env EV_CAR2_KWH 75
+    vin2=$(ask 'Second car VIN (17 characters)' | tr a-z A-Z)
+    grep -v '^tesla_vin_2:' esphome/secrets.yaml > esphome/secrets.yaml.tmp && mv esphome/secrets.yaml.tmp esphome/secrets.yaml
+    printf 'tesla_vin_2: "%s"
+' "$vin2" >> esphome/secrets.yaml
   elif ! grep -q '^tesla_vin_2:' esphome/secrets.yaml; then
-    printf 'ble_mac_address_2: ""\ntesla_vin_2: ""\n' >> esphome/secrets.yaml
+    printf 'tesla_vin_2: ""
+' >> esphome/secrets.yaml
   fi
   if [ "$(ask 'Flash the NanoC6 over USB now? (y/N)' n)" = y ]; then
     port=$(ask 'USB serial port' "$(ls /dev/ttyACM* /dev/cu.usbmodem* 2>/dev/null | head -1)")
@@ -102,7 +104,11 @@ EOF
     echo "Flashed. Find the bridge IP in your router (hostname tesla-ble)."
   fi
   set_env TESLA_BLE_HOST "$(ask 'Bridge IP address' "$(get_env TESLA_BLE_HOST)")"
-  echo 'Pairing: sit in the car, open http://<bridge-ip>/ (user/password from .env), press "Pair BLE Key", tap your key card on the console, confirm on the screen.'
+  if [ -n "$(get_env TESLA_BLE_HOST)" ] && [ "$(ask 'Pair the key with your car(s) now? Be in the car with your key card (y/N)' n)" = y ]; then
+    node --env-file=.env scripts/pair-tesla.js
+  else
+    echo 'Pair later any time with: node --env-file=.env scripts/pair-tesla.js'
+  fi
 fi
 
 echo; echo "-- Starting --"
