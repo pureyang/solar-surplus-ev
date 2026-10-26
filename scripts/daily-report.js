@@ -164,7 +164,8 @@ const report = {
   // Days mostly on 15-min cloud history can't separate the car from the house; keep them out of the baseline.
   baselineEligible: Math.round((have.filter((x) => x.src === 'local').length / mins.length) * 100) >= 40,
   notifications: {
-    sent: notes.filter((n) => n.sent).length, failed: notes.filter((n) => !n.sent).length,
+    sent: notes.filter((n) => n.sent).length, logged: notes.filter((n) => n.error === 'log only').length,
+    failed: notes.filter((n) => !n.sent && n.error !== 'log only').length,
     list: notes.map((n) => ({ ts: n.ts, kind: n.kind, sent: Boolean(n.sent), amps: n.amps, title: n.title, error: n.error })),
   },
   sessions,
@@ -192,6 +193,6 @@ console.log(`EV ${kwh(evWh)} (${kwh(evSolarWh)} from solar)  daylight grid impor
 console.log(`goal: ${goal.status}  (battery ${batteryFull ? 'full' : 'not full'} by sunset, exported ${kwh(exportCarRoom)} while car had room, ${kwh(goal.exportOtherWh)} otherwise)`);
 console.log(`grid leakage ${leakage.wh} Wh (spikes ${leakage.spikeWh} Wh over ${leakage.spikeSeconds} s, bias ${leakage.biasWh} Wh, max ${leakage.maxW} W)`
   + `, night ${leakage.nightPct ?? '-'}% of house use  [${Math.round(leakage.seconds / 36) / 100} h of gateway data]`);
-console.log(`notifications sent ${report.notifications.sent}, failed ${report.notifications.failed}`);
+console.log(`notifications sent ${report.notifications.sent}, log only ${report.notifications.logged}, failed ${report.notifications.failed}`);
 for (const s of sessions) console.log(`  ${fmtT(s.start)}-${s.open ? 'now' : fmtT(s.end)} ${s.label} ~${(s.w / 1000).toFixed(1)} kW ${s.minutes} min ${s.kwh} kWh`);
 console.log(`baseline: ${prior.length} earlier day(s)`);
