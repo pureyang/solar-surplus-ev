@@ -121,6 +121,49 @@ const goal = {
   carRoomMinutes: daylight.filter((x) => carRoom.has(x.ts)).length,
   status: !batteryFull ? 'battery short' : exportCarRoom > GOAL_EXPORT_WH ? 'export missed' : 'met',
 };
+// --- export windows: where the lost solar went, with house battery and car state, for reviewing the capture rate.
+// Exporting minutes (> EXPORT_W) merge when gaps are <= EXPORT_GAP_MIN; windows under EXPORT_MIN_WH count as blips.
+const EXPORT_W = 50, EXPORT_GAP_MIN = 5, EXPORT_MIN_WH = 50;
+const carMin = new Map(db.prepare(`SELECT (ts/60)*60 AS m, MAX(plugged) AS plugged, MAX(charging) AS charging,
+    MIN(battery) AS battery, MAX(charge_limit) AS lim FROM ev_samples WHERE ts >= ? AND ts < ? GROUP BY m`)
+  .all(d0, d1).map((r) => [r.m, r]));
+const carLabel = (m) => {
+  const c = carMin.get(m);
+  if (!c || c.plugged == null) return 'car unknown';
+  if (!c.plugged) return 'car not plugged';
+  if (c.charging) return 'car charging';
+  return carRoom.has(m) ? 'car plugged, idle with room' : 'car plugged, at limit';
+};
+const exportWindows = [];
+let exportBlipWh = 0;
+{
+  let w = null;
+  const close = () => {
+    if (!w) return;
+    const wh = Math.round(w.wh);
+    if (wh < EXPORT_MIN_WH) { exportBlipWh += wh; w = null; return; }
+    const car = Object.entries(w.car).sort((a, b) => b[1] - a[1])[0][0];
+    exportWindows.push({ start: w.start, end: w.end + 60, wh, avgExportW: Math.round((w.wh * 60) / w.n),
+      avgExcessW: Math.round(w.excess / w.n), soc: [w.soc0, w.soc1], car,
+      carBattery: w.carBatt, carLimit: w.carLim });
+    w = null;
+  };
+  for (const x of daylight) {
+    const out = -x.grid;
+    if (w && x.ts - w.end > EXPORT_GAP_MIN * 60) close();
+    if (out <= EXPORT_W) continue;
+    if (!w) w = { start: x.ts, end: x.ts, wh: 0, n: 0, excess: 0, soc0: x.soc, soc1: x.soc, car: {}, carBatt: null, carLim: null };
+    const c = carMin.get(x.ts);
+    w.end = x.ts; w.wh += out / 60; w.n++; w.excess += Math.max(0, x.pv - x.house);
+    w.soc0 = Math.min(w.soc0, x.soc); w.soc1 = Math.max(w.soc1, x.soc);
+    const label = carLabel(x.ts);
+    w.car[label] = (w.car[label] || 0) + 1;
+    if (c?.battery != null) w.carBatt = c.battery;
+    if (c?.lim != null) w.carLim = c.lim;
+  }
+  close();
+}
+
 // --- grid leakage: grid import while the house battery could have covered it (see docs/grid-leakage.md).
 // Gateway 1 Hz rows only. Spike = import above SPIKE_W (battery lagging a load step); bias = the rest.
 const SPIKE_W = 300;
@@ -160,6 +203,7 @@ const report = {
   evSolarShare: evWh > 0 ? Math.round((evSolarWh / evWh) * 1000) / 1000 : null,
   battery: { fullAt: full?.ts ?? null, socAtSunset: sunsetSoc },
   goal,
+  exportWindows, exportBlipWh,
   gridLeakage: leakage,
   // Days mostly on 15-min cloud history can't separate the car from the house; keep them out of the baseline.
   baselineEligible: Math.round((have.filter((x) => x.src === 'local').length / mins.length) * 100) >= 40,
@@ -191,6 +235,11 @@ console.log(`solar ${kwh(produced)}  excess ${kwh(excess)}  exported ${kwh(expor
 console.log(`battery charged ${kwh(battCharged)}  full at ${full ? fmtT(full.ts) : 'never'}  soc at sunset ${sunsetSoc ?? '-'}%`);
 console.log(`EV ${kwh(evWh)} (${kwh(evSolarWh)} from solar)  daylight grid import ${kwh(importedDay)}`);
 console.log(`goal: ${goal.status}  (battery ${batteryFull ? 'full' : 'not full'} by sunset, exported ${kwh(exportCarRoom)} while car had room, ${kwh(goal.exportOtherWh)} otherwise)`);
+console.log(`export windows (${exportBlipWh} Wh more in blips under ${EXPORT_MIN_WH} Wh):`);
+for (const w of exportWindows) {
+  const car = w.carBattery != null ? `${w.car} ${w.carBattery}%/${w.carLimit ?? '?'}%` : w.car;
+  console.log(`  ${fmtT(w.start)}-${fmtT(w.end)} ${w.wh} Wh (avg ${w.avgExportW} W out, ${w.avgExcessW} W excess)  house ${w.soc[0]}-${w.soc[1]}%  ${car}`);
+}
 console.log(`grid leakage ${leakage.wh} Wh (spikes ${leakage.spikeWh} Wh over ${leakage.spikeSeconds} s, bias ${leakage.biasWh} Wh, max ${leakage.maxW} W)`
   + `, night ${leakage.nightPct ?? '-'}% of house use  [${Math.round(leakage.seconds / 36) / 100} h of gateway data]`);
 console.log(`notifications sent ${report.notifications.sent}, log only ${report.notifications.logged}, failed ${report.notifications.failed}`);
