@@ -755,6 +755,22 @@ function evHeadline(ev) {
   return `<div class="big stop">Don't charge EV from solar now</div><div>${p.reason || ''}</div><div class="muted">${car}${next}</div>`;
 }
 
+async function loadScorecard() {
+  const rows = await getJSON('/api/scorecard');
+  const k = (w) => (w == null ? '–' : (w / 1000).toFixed(1));
+  const mark = { met: '<span class="up">✓ met</span>', 'export missed': '<span class="down">✗ export missed</span>', 'battery short': '<span class="down">✗ battery short</span>' };
+  $('scorecard').innerHTML = '<thead><tr><th>Day</th><th>Goal</th><th>Solar</th><th>EV from solar</th><th>Battery full</th><th>Sunset SOC</th>'
+    + '<th>Exported, car had room</th><th>Exported, other</th></tr></thead><tbody>'
+    + (rows.length ? rows.map((r) => {
+      const g = r.goal;
+      return `<tr><td>${new Date(r.day + 'T12:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</td>
+        <td>${g ? mark[g.status] : '<span class="muted">–</span>'}</td><td>${k(r.wh.produced)} kWh</td><td>${k(r.wh.evFromSolar)} kWh</td>
+        <td>${r.battery.fullAt ? fmtT(r.battery.fullAt) : 'never'}</td><td>${r.battery.socAtSunset ?? '–'}%</td>
+        <td>${g ? k(g.exportCarRoomWh) + ' kWh' : '–'}</td><td>${g ? k(g.exportOtherWh) + ' kWh' : '–'}</td></tr>`;
+    }).join('') : '<tr><td colspan="8" class="muted">No reports yet; the first one is written at 11:55 PM.</td></tr>')
+    + '</tbody>';
+}
+
 async function loadEv() {
   const ev = await getJSON('/api/ev');
   const html = evHeadline(ev);
@@ -770,6 +786,8 @@ async function loadEv() {
     `<dt>${new Date(n.ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</dt>
      <dd><b>${n.title}</b>${n.sent || n.error === 'log only' ? '' : ' <span class="stop">(not delivered: ' + (n.error || '?') + ')</span>'}<br><span class="muted">${n.body}</span></dd>`).join('')
     : '<span class="muted">None yet.</span>';
+
+  loadScorecard().catch(() => {});
 
   // Chart: today on a 15-min grid; actual solar from Enlighten intervals, forecast for the rest.
   const day0 = midnight(), steps = (ev.plan && ev.plan.steps) || [];

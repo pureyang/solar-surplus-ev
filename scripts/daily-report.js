@@ -86,6 +86,10 @@ sessions.sort((a, b) => a.start - b.start);
 const evMeasured = new Map(db.prepare(`SELECT (ts/60)*60 AS m, AVG(CASE WHEN charging = 1 THEN power_w ELSE 0 END) AS w
   FROM ev_samples WHERE ts >= ? AND ts < ? AND (state IS NOT NULL OR power_w IS NOT NULL) GROUP BY m`)
   .all(d0, d1).map((r) => [r.m, r.w]));
+// Minutes the car was plugged in below its own charge limit, i.e. could have taken exported solar.
+const carRoom = new Set(db.prepare(`SELECT (ts/60)*60 AS m FROM ev_samples WHERE ts >= ? AND ts < ?
+    AND plugged = 1 AND battery IS NOT NULL AND charge_limit IS NOT NULL GROUP BY m HAVING MIN(battery) < MAX(charge_limit)`)
+  .all(d0, d1).map((r) => r.m));
 for (const x of have) {
   const s = sessions.find((q) => q.ev && x.ts >= q.start && x.ts < q.end);
   x.ev = evMeasured.has(x.ts) ? evMeasured.get(x.ts) || 0 : s ? Math.min(s.w, Math.max(0, x.load)) : 0;
@@ -105,6 +109,18 @@ const evWh = wh((x) => x.ev);
 const evSolarWh = wh((x) => Math.min(x.ev, Math.max(0, x.pv - x.house)));
 const full = have.find((x) => x.soc >= 99);
 const sunsetSoc = lastSun ? have.find((x) => x.ts === lastSun)?.soc : null;
+// --- daily goal: house battery full before sunset, and no solar exported while the car could take it.
+const GOAL_EXPORT_WH = 500;
+const exportCarRoom = wh((x) => (carRoom.has(x.ts) ? Math.max(0, -x.grid) : 0), daylight);
+const batteryFull = Boolean(full && lastSun && full.ts <= lastSun);
+const goal = {
+  batteryFull,
+  exportCarRoomWh: exportCarRoom,
+  exportOtherWh: exported - exportCarRoom,
+  evFromSolarWh: evSolarWh,
+  carRoomMinutes: daylight.filter((x) => carRoom.has(x.ts)).length,
+  status: !batteryFull ? 'battery short' : exportCarRoom > GOAL_EXPORT_WH ? 'export missed' : 'met',
+};
 // --- grid leakage: grid import while the house battery could have covered it (see docs/grid-leakage.md).
 // Gateway 1 Hz rows only. Spike = import above SPIKE_W (battery lagging a load step); bias = the rest.
 const SPIKE_W = 300;
@@ -143,6 +159,7 @@ const report = {
   captureRate: excess > 0 ? Math.round((1 - exported / excess) * 1000) / 1000 : null,
   evSolarShare: evWh > 0 ? Math.round((evSolarWh / evWh) * 1000) / 1000 : null,
   battery: { fullAt: full?.ts ?? null, socAtSunset: sunsetSoc },
+  goal,
   gridLeakage: leakage,
   // Days mostly on 15-min cloud history can't separate the car from the house; keep them out of the baseline.
   baselineEligible: Math.round((have.filter((x) => x.src === 'local').length / mins.length) * 100) >= 40,
@@ -172,6 +189,7 @@ console.log(`Report ${day}  (gateway ${report.coverage.localPct}% / cloud ${repo
 console.log(`solar ${kwh(produced)}  excess ${kwh(excess)}  exported ${kwh(exported)}  capture ${report.captureRate == null ? '-' : Math.round(report.captureRate * 100) + '%'}`);
 console.log(`battery charged ${kwh(battCharged)}  full at ${full ? fmtT(full.ts) : 'never'}  soc at sunset ${sunsetSoc ?? '-'}%`);
 console.log(`EV ${kwh(evWh)} (${kwh(evSolarWh)} from solar)  daylight grid import ${kwh(importedDay)}`);
+console.log(`goal: ${goal.status}  (battery ${batteryFull ? 'full' : 'not full'} by sunset, exported ${kwh(exportCarRoom)} while car had room, ${kwh(goal.exportOtherWh)} otherwise)`);
 console.log(`grid leakage ${leakage.wh} Wh (spikes ${leakage.spikeWh} Wh over ${leakage.spikeSeconds} s, bias ${leakage.biasWh} Wh, max ${leakage.maxW} W)`
   + `, night ${leakage.nightPct ?? '-'}% of house use  [${Math.round(leakage.seconds / 36) / 100} h of gateway data]`);
 console.log(`notifications sent ${report.notifications.sent}, failed ${report.notifications.failed}`);

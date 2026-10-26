@@ -35,23 +35,52 @@ setInterval(() => { try { store.syncInverter15m(Date.now() / 1000 - 3 * 3600); }
 
 // Nightly report (capture rate, grid leakage, sessions) into data/reports/<day>.json at 23:55,
 // and on boot for yesterday if it was missed.
-function runReport(day) {
+function runReport(day, done) {
   execFile(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(config.root, 'scripts/daily-report.js'), day],
     { env: process.env, timeout: 120_000 }, (err, out) => {
       if (err) log.warn('report', `${day}: ${err.message}`);
-      else log.info('report', out.split('\n').slice(0, 3).join(' | '));
+      else log.info('report', out.split('\n').filter((l, i) => i < 3 || l.startsWith('goal:')).join(' | '));
+      if (done) done(err);
     });
 }
 const localDay = (d) => d.toLocaleDateString('en-CA');
+const kwh = (wh) => `${(wh / 1000).toFixed(1)} kWh`;
+const fmtClock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+// Push today's goal result once solar production has ended for the day.
+async function sendDailySummary(day) {
+  let r;
+  try { r = JSON.parse(fs.readFileSync(path.join(config.dataDir, 'reports', `${day}.json`), 'utf8')); } catch { return; }
+  const g = r.goal;
+  if (!g) return;
+  const ok = g.status === 'met';
+  const lines = [
+    `Solar ${kwh(r.wh.produced)}, EV ${kwh(r.wh.ev)} (${kwh(g.evFromSolarWh)} from solar).`,
+    `House battery ${g.batteryFull ? 'full at ' + fmtClock(r.battery.fullAt) : 'not full'}, ${r.battery.socAtSunset ?? '-'}% at sunset.`,
+    `Exported ${kwh(g.exportCarRoomWh)} while a car had room, ${kwh(g.exportOtherWh)} otherwise.`,
+  ];
+  await notify({ kind: 'DAILY_SUMMARY', title: `Solar goal: ${g.status}`, body: lines.join('\n'), priority: ok ? 3 : 4, tags: [ok ? 'white_check_mark' : 'warning'] });
+}
+
 {
   const y = new Date(Date.now() - 86400_000);
   if (!fs.existsSync(path.join(config.dataDir, 'reports', `${localDay(y)}.json`))) setTimeout(() => runReport(localDay(y)), 60_000);
-  let lastRun = null;
+  let lastRun = null, lastSun = null, summaryDay = null;
   setInterval(() => {
     const now = new Date();
-    if (now.getHours() === 23 && now.getMinutes() >= 55 && lastRun !== localDay(now)) {
-      lastRun = localDay(now);
-      runReport(lastRun);
+    const today = localDay(now);
+    const smp = collector.current;
+    if (smp && smp.pv > 50) lastSun = Date.now();
+    // Solar is over: no production for 20 min after noon (or evening after a restart). Score the day and push it once.
+    const sunDone = now.getHours() >= 12 && (lastSun ? Date.now() - lastSun > 20 * 60_000 : now.getHours() >= 18);
+    if (sunDone && summaryDay !== today) {
+      summaryDay = today;
+      const midnight = new Date(now).setHours(0, 0, 0, 0) / 1000;
+      if (!store.recentNotifications(50).some((n) => n.kind === 'DAILY_SUMMARY' && n.ts >= midnight)) runReport(today, (err) => { if (!err) sendDailySummary(today); });
+    }
+    if (now.getHours() === 23 && now.getMinutes() >= 55 && lastRun !== today) {
+      lastRun = today;
+      runReport(today);
     }
   }, 60_000);
 }
@@ -144,6 +173,15 @@ const routes = {
   '/api/leakage': (req, res, q) => {
     const [from, to] = range(q);
     sendJson(res, store.leakageSeries(from, to, Number(q.get('res')) || 3600));
+  },
+  // Daily goal per nightly report: house battery full by sunset, no solar exported while the car had room.
+  '/api/scorecard': (req, res) => {
+    const dir = path.join(config.dataDir, 'reports');
+    const days = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^\d{4}-\d\d-\d\d\.json$/.test(f)).sort().reverse().slice(0, 30) : [];
+    sendJson(res, days.map((f) => {
+      const r = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      return { day: r.day, wh: r.wh, battery: r.battery, goal: r.goal || null, captureRate: r.captureRate, coverage: r.coverage };
+    }));
   },
   '/api/tesla': (req, res, q) => {
     const [from, to] = range(q);

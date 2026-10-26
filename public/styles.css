@@ -98,6 +98,7 @@ table.arr { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 table.arr th, table.arr td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 table.arr th:first-child, table.arr td:first-child { text-align: left; }
 table.arr tbody tr { cursor: pointer; }
+table.score tbody tr { cursor: default; }
 table.arr tbody tr:hover, table.arr tr.sel { background: color-mix(in srgb, var(--load) 14%, transparent); }
 table.arr .bar { display: inline-block; height: 8px; border-radius: 4px; background: var(--pv); vertical-align: middle; margin-right: 6px; }
 table.arr .up { color: var(--batt); } table.arr .down { color: var(--warn); }
