@@ -174,6 +174,12 @@ export function writeEvSample(tsSec, e) {
   insEv.run(tsSec, bool(e.charging), e.state, e.ampsSet, e.current, e.voltage, e.powerW,
     e.battery, e.limit, e.energyAdded, bool(e.pluggedIn), bool(e.asleep), e.rssi, e.car ?? null, bool(e.portOpen));
 }
+// Each car's most recent bridge reading (the bridge only sees one car at a time, so the other one is older).
+const lastCar = db.prepare(`SELECT ts, battery, charge_limit AS "limit", plugged, charging, power_w AS powerW, voltage, state
+  FROM ev_samples WHERE car = ? AND battery IS NOT NULL ORDER BY ts DESC LIMIT 1`);
+export function lastCarSample(key) {
+  return lastCar.get(key) || null;
+}
 export function evSeries(fromSec, toSec) {
   return db.prepare('SELECT * FROM ev_samples WHERE ts >= ? AND ts < ? ORDER BY ts').all(fromSec, toSec);
 }
@@ -391,6 +397,31 @@ export function energy(fromSec, toSec) {
   }
   const expected = Math.max(1, Math.min(toSec, Date.now() / 1000) - fromSec);
   return { ...t, coverage: Math.min(1, t.n / expected), filled: slotCount ? filled / Math.max(slotCount, slots.length) : 0 };
+}
+
+// Per local day: produced, consumed (incl. EV), exported, EV (Tesla bridge; null on days before it), Wh.
+// Finished days never change, so they are cached; today is recomputed each call.
+const dayCache = new Map();
+const evDayWh = db.prepare(`SELECT SUM(w) / 60 AS wh, COUNT(*) AS n FROM (SELECT AVG(CASE WHEN charging = 1 THEN power_w ELSE 0 END) AS w
+  FROM ev_samples WHERE ts >= ? AND ts < ? AND (state IS NOT NULL OR power_w IS NOT NULL) GROUP BY ts / 60)`);
+export function dailyEfficiency(days) {
+  const out = [];
+  const today = new Date(new Date().setHours(0, 0, 0, 0));
+  for (let i = days - 1; i >= 0; i--) {
+    const a = new Date(today); a.setDate(a.getDate() - i);
+    const b = new Date(a); b.setDate(b.getDate() + 1);
+    const day = a.toLocaleDateString('en-CA');
+    let r = i > 0 && dayCache.get(day);
+    if (!r) {
+      const e = energy(a / 1000, b / 1000);
+      const ev = evDayWh.get(a / 1000, b / 1000);
+      r = { day, produced: Math.round(e.produced || 0), consumed: Math.round(e.consumed || 0), exported: Math.round(e.exported || 0),
+        ev: ev.n ? Math.round(ev.wh || 0) : null };
+      if (i > 0) dayCache.set(day, r);
+    }
+    if (r.produced > 0) out.push(r);
+  }
+  return out;
 }
 
 export function meterSeries(fromSec, toSec, res) {

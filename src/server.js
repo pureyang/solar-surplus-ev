@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
@@ -99,7 +100,8 @@ collector.on('tick', (snap) => {
   for (const res of clients) res.write(msg);
 });
 
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
 const STATIC = {
   '/vendor/uPlot.iife.min.js': path.join(config.root, 'node_modules/uplot/dist/uPlot.iife.min.js'),
   '/vendor/uPlot.min.css': path.join(config.root, 'node_modules/uplot/dist/uPlot.min.css'),
@@ -187,6 +189,22 @@ const routes = {
     const [from, to] = range(q);
     sendJson(res, { status: tesla.status, cars: cars.status, latest: tesla.current(), series: store.evSeries(from, to), events: store.evEvents(from, to) });
   },
+  // Tablet / phone app: both cars' last readings, controller state, today's solar plan, swap advice.
+  '/api/app': (req, res) => {
+    const now = Date.now() / 1000;
+    const list = config.tesla.cars.map((c) => ({ key: c.key, name: c.name, kwh: c.kwh, ...store.lastCarSample(c.key) }));
+    const active = list.find((c) => c.name === cars.status.car || c.key === cars.status.car) || null;
+    // Swap advice only once the plugged-in car has no room left; before that the answer is "keep charging".
+    const full = active && active.battery != null && active.limit != null && active.battery >= active.limit - 1;
+    const advice = full ? controller.swapAdvice(now, { car: active.key, voltage: active.voltage, carName: active.name }).trim() : '';
+    const p = advisor.last?.plan;
+    sendJson(res, {
+      at: now, cars: list, activeCar: active?.key ?? null, switcher: cars.status, control: controller.status, advice,
+      plan: p && { ok: p.ok, reason: p.reason, soc: p.soc, solarEnd: p.solarEnd, best: p.best, steps: (p.steps || []).map((st) => ({ ts: st.ts, pv: st.pv, load: st.load })) },
+    });
+  },
+  // Daily produced / consumed / exported / EV Wh for the efficiency view: ?days=N (default 400)
+  '/api/efficiency': (req, res, q) => sendJson(res, store.dailyEfficiency(Math.min(800, Math.max(1, Number(q.get('days')) || 400)))),
   '/api/cloud-intervals': (req, res, q) => {
     const [from, to] = range(q);
     sendJson(res, store.cloudIntervals(from, to));
@@ -214,9 +232,34 @@ const routes = {
   },
 };
 
+// This PC is always allowed. Other devices need APP_KEY once (?key=...), then carry it in a cookie.
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const sameKey = (k) => {
+  const a = Buffer.from(String(k)), b = Buffer.from(config.appKey);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+function allowed(req, res, url) {
+  if (LOOPBACK.has(req.socket.remoteAddress)) return true;
+  if (!config.appKey) return false;
+  const q = url.searchParams.get('key');
+  const c = /(?:^|;\s*)sse_key=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+  const k = q || (c && decodeURIComponent(c)) || req.headers['x-app-key'];
+  if (!k || !sameKey(k)) return false;
+  if (q) res.setHeader('Set-Cookie', `sse_key=${encodeURIComponent(q)}; Path=/; Max-Age=315360000; HttpOnly; SameSite=Lax`);
+  return true;
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
+    if (!allowed(req, res, url)) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      return res.end(config.appKey ? 'Open /app/?key=<APP_KEY from .env> once on this device.' : 'Set APP_KEY in .env to allow other devices.');
+    }
+    if (url.pathname === '/app') {
+      res.writeHead(301, { Location: '/app/' + url.search });
+      return res.end();
+    }
     const route = routes[url.pathname];
     if (route) {
       return Promise.resolve(route(req, res, url.searchParams)).catch((e) => {
@@ -226,13 +269,13 @@ const server = http.createServer((req, res) => {
     }
 
     const file = STATIC[url.pathname]
-      || path.join(config.publicDir, path.normalize(url.pathname === '/' ? '/index.html' : url.pathname));
+      || path.join(config.publicDir, path.normalize(url.pathname.endsWith('/') ? url.pathname + 'index.html' : url.pathname));
     if (!file.startsWith(config.publicDir) && !Object.values(STATIC).includes(file)) {
       res.writeHead(403); return res.end();
     }
     fs.readFile(file, (err, buf) => {
       if (err) { res.writeHead(404); return res.end('not found'); }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
       res.end(buf);
     });
   } catch (e) {
