@@ -5,6 +5,7 @@
 // The charge port door comes from VCSEC, which the bridge reads without waking the car.
 import { config } from './config.js';
 import { log } from './log.js';
+import { quiet } from './quiet.js';
 
 const DWELL_S = 4 * 60;      // time on each car before moving on: connect + a few VCSEC polls
 const SETTLE_S = 45;         // after a switch, wait this long before asking the car for fresh data
@@ -45,8 +46,10 @@ export class CarSwitcher {
       return;
     }
     const why = !connected ? `${car.name} not in range or not paired` : `${car.name} not plugged in`;
-    if (sinceSwitch < DWELL_S) {
-      this.status = { enabled: true, mode: 'discovery', car: car.name, reason: `${why}; checking it until ${clock(now - sinceSwitch + DWELL_S)}` };
+    // Overnight with nothing plugged in there is no hurry to find a car: stay longer on each one.
+    const dwell = quiet.active() ? Math.max(DWELL_S, config.quiet.carDwellS) : DWELL_S;
+    if (sinceSwitch < dwell) {
+      this.status = { enabled: true, mode: 'discovery', car: car.name, reason: `${why}; checking it until ${clock(now - sinceSwitch + dwell)}` };
       return;
     }
     const cars = config.tesla.cars;

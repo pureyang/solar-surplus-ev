@@ -272,6 +272,25 @@ installed, and other factors; HA's docs warn of dropped connections, freezes and
 If your gateway drops out, restarts, or the log shows repeated timeouts, raise `LOCAL_POLL_MS` and
 `METER_POLL_MS` (e.g. 5000 and 15000).
 
+### Quiet mode (evening and overnight)
+
+Between `QUIET_FROM` and `QUIET_UNTIL` (default 20:00 to 06:00) the app polls much less, but only while
+solar is under `QUIET_DAYLIGHT_W` (100 W) and no car is charging:
+
+| What | Normal | Quiet |
+|---|---|---|
+| Gateway live data | 1 s | 15 s |
+| Gateway CT meters | 5 s | 60 s |
+| Battery units | 30 s | 2 min |
+| Inverters | 5 min | 15 min |
+| Car switching (neither plugged in) | 4 min per car | 10 min per car |
+| `ev_samples` rows | 10 s | 60 s |
+
+The last reading is held and logged every second, so energy totals stay correct and the dashboard just
+updates every 15 s. Polling returns to normal when the sun comes up or a car starts charging (the
+controller needs fast data to manage a session). `QUIET_POLLING=0` turns it off; `/api/status` shows
+`quiet: true` while it is on.
+
 Signs follow Enphase: battery **+ = discharging**, grid **+ = importing**.
 
 ## Storage (`data/enphase.db`, SQLite)

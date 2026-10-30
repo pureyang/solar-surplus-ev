@@ -13,6 +13,7 @@ import { Controller } from './controller.js';
 import { CarSwitcher } from './cars.js';
 import { notify, ntfyUrl } from './notify.js';
 import { log } from './log.js';
+import { quiet } from './quiet.js';
 
 const collector = new Collector();
 collector.start();
@@ -192,7 +193,7 @@ const routes = {
     sendJson(res, store.cloudIntervals(from, to));
   },
   '/api/status': (req, res) => sendJson(res, {
-    ...collector.snapshot(), tesla: tesla.status, db: store.stats(), log: log.recent(),
+    ...collector.snapshot(), tesla: tesla.status, db: store.stats(), log: log.recent(), quiet: quiet.active(),
     config: { siteId: config.enlighten.siteId, gatewayHost: config.gateway.host, preferred: config.preferred,
       recordHistory: config.recordHistory, historyHours: config.historyHours, notify: config.ev.notify },
   }),

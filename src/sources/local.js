@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { getGatewayToken } from '../auth.js';
 import { fromLocal } from '../normalize.js';
 import { log } from '../log.js';
+import { quiet } from '../quiet.js';
 
 // Gateway uses a self-signed cert; trust is limited to this agent, which only talks to GATEWAY_HOST.
 const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true, maxSockets: 4 });
@@ -58,17 +59,20 @@ export class LocalSource extends EventEmitter {
     if (!this.enabled()) { this.status.state = 'disabled'; return; }
     this.status.state = 'starting';
     this.running = true;
-    this.every(config.gateway.livePollMs, () => this.pollLive());
-    this.every(config.gateway.meterPollMs, () => this.pollMeters());
-    this.every(30_000, () => this.pollBatteries(), true);
-    this.every(300_000, () => this.pollInverters(), true);
+    const q = config.quiet;
+    this.every(() => quiet.pick(config.gateway.livePollMs, q.livePollMs), () => this.pollLive());
+    this.every(() => quiet.pick(config.gateway.meterPollMs, q.meterPollMs), () => this.pollMeters());
+    this.every(() => quiet.pick(30_000, q.batteryPollMs), () => this.pollBatteries(), true);
+    this.every(() => quiet.pick(300_000, q.inverterPollMs), () => this.pollInverters(), true);
   }
 
   stop() { this.running = false; this.timers.forEach(clearTimeout); this.timers.clear(); }
 
   // One request at a time per loop (never stacks on a slow gateway). After n consecutive failures
   // the next try waits ms * 2^n, capped at 30 s (or ms, for loops already slower than that).
-  every(ms, fn, immediate = false) {
+  // ms may be a function, re-read before each wait, so quiet mode can change the pace.
+  every(msOrFn, fn, immediate = false) {
+    const interval = () => (typeof msOrFn === 'function' ? msOrFn() : msOrFn);
     let failures = 0;
     let timer = null;
     const schedule = (delay) => {
@@ -79,6 +83,7 @@ export class LocalSource extends EventEmitter {
     const run = async () => {
       this.timers.delete(timer);
       const t0 = Date.now();
+      const ms = interval();
       try {
         if (await fn() === STOP) return;
         failures = 0;
@@ -89,7 +94,7 @@ export class LocalSource extends EventEmitter {
         schedule(Math.min(ms * 2 ** failures, Math.max(ms, MAX_BACKOFF_MS)));
       }
     };
-    schedule(immediate ? 0 : ms);
+    schedule(immediate ? 0 : interval());
   }
 
   fail(e) {

@@ -84,4 +84,17 @@ export const config = {
     livePollMs: Math.max(1000, Number(env.LOCAL_POLL_MS || 1000)),
     meterPollMs: Math.max(1000, Number(env.METER_POLL_MS || 5000)),
   },
+  // Quiet mode (src/quiet.js): slower polling in the evening and overnight while no car is charging.
+  quiet: {
+    enabled: !['0', 'false', 'off'].includes(String(env.QUIET_POLLING ?? '1').toLowerCase()),
+    from: env.QUIET_FROM || '20:00',
+    until: env.QUIET_UNTIL || '06:00',
+    daylightW: Number(env.QUIET_DAYLIGHT_W || 100),  // at or above this solar W it is not quiet
+    livePollMs: Math.max(1000, Number(env.QUIET_LIVE_POLL_MS || 15_000)),
+    meterPollMs: Math.max(1000, Number(env.QUIET_METER_POLL_MS || 60_000)),
+    batteryPollMs: Math.max(1000, Number(env.QUIET_BATTERY_POLL_MS || 120_000)),
+    inverterPollMs: Math.max(1000, Number(env.QUIET_INVERTER_POLL_MS || 900_000)),
+    carDwellS: Math.max(60, Number(env.QUIET_CAR_DWELL_S || 600)),  // per car, while neither is plugged in
+    evSampleS: Math.max(10, Number(env.QUIET_EV_SAMPLE_S || 60)),   // ev_samples row spacing
+  },
 };

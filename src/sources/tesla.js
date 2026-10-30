@@ -4,6 +4,7 @@
 import { EventEmitter } from 'node:events';
 import { config } from '../config.js';
 import { log } from '../log.js';
+import { quiet } from '../quiet.js';
 
 // ESPHome entity (domain + object id from the entity name) -> our field.
 const FIELDS = {
@@ -62,9 +63,13 @@ export class TeslaSource extends EventEmitter {
     if (!this.enabled()) { this.status.state = 'disabled'; return; }
     this.connect();
     // Only log while the bridge is actually talking to the car; otherwise every field is empty.
+    // Quiet mode logs a row every QUIET_EV_SAMPLE_S instead of every 10 s. It ends as soon as a car charges.
+    let lastRow = 0;
     setInterval(() => {
+      quiet.setCharging(this.current().charging);
+      if (quiet.active() && Date.now() - lastRow < config.quiet.evSampleS * 1000 - 1000) return;
       const car = this.live();
-      if (car) this.emit('sample', Math.floor(Date.now() / 1000), car);
+      if (car) { lastRow = Date.now(); this.emit('sample', Math.floor(Date.now() / 1000), car); }
     }, 10_000);
   }
 

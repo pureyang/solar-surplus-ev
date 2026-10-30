@@ -6,6 +6,7 @@ import { LocalSource } from './sources/local.js';
 import { CloudSource } from './sources/cloud.js';
 import { DemoSource } from './sources/demo.js';
 import { log } from './log.js';
+import { quiet } from './quiet.js';
 
 export class Collector extends EventEmitter {
   constructor() {
@@ -19,7 +20,7 @@ export class Collector extends EventEmitter {
     this.cloudStartedAt = 0;
 
     for (const src of [this.local, this.cloud]) {
-      src.on('sample', (s) => { this.latest[src.name] = { at: Date.now(), s }; });
+      src.on('sample', (s) => { this.latest[src.name] = { at: Date.now(), s }; quiet.setPv(s.pv); });
     }
     this.local.on('meter', (ts, r) => store.writeMeter(ts, r));
     this.local.on('battery', (ts, u) => store.writeBatteryUnit(ts, u));
@@ -63,12 +64,14 @@ export class Collector extends EventEmitter {
   }
 
   chooseSource() {
-    const localOk = this.fresh('local', config.fallbackAfterS * 1000);
+    // Quiet mode polls every ~15 s, so a reading that old is normal, not a stalled gateway.
+    const slow = quiet.staleMs();
+    const localOk = this.fresh('local', Math.max(config.fallbackAfterS * 1000, slow));
     const preferLocal = config.preferred !== 'cloud' && this.local.enabled();
 
     if (preferLocal && localOk) {
       // Local healthy: release the cloud stream after 2 min of stable local data.
-      if (this.cloud.running && this.fresh('local', 1500) && this.local.status.lastOk - this.cloudStartedAt > 120_000) {
+      if (this.cloud.running && this.fresh('local', Math.max(1500, slow)) && this.local.status.lastOk - this.cloudStartedAt > 120_000) {
         log.info('collector', 'local gateway healthy, cloud stream to standby');
         this.cloud.stop();
       }
@@ -92,7 +95,8 @@ export class Collector extends EventEmitter {
       this.active = name;
     }
     const ts = Math.floor(Date.now() / 1000);
-    const l = name && this.fresh(name, 3000);
+    // While quiet the last reading is held and written each second, so energy totals (W x 1 s) stay right.
+    const l = name && this.fresh(name, Math.max(3000, quiet.staleMs()));
     if (l) {
       try {
         store.writeSample(ts, l.s);
