@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b131a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Solar EV">
+<title>Solar EV</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <h1>Solar EV</h1>
+  <span id="conn" class="chip off">connecting</span>
+  <span class="grow"></span>
+  <button type="button" id="fs" class="ghost" hidden>Full screen</button>
+</header>
+
+<main id="main" data-tab="eff">
+  <section id="eff" class="col-left" aria-label="Efficiency">
+    <div class="card">
+      <div class="lbl"><span>Solar used at home</span><span id="effSub"></span></div>
+      <div class="effnums" id="effNums"></div>
+      <div class="mseg" role="group" aria-label="Chart period">
+        <button type="button" data-mode="day">Day</button><button type="button" data-mode="week">Week</button><button type="button" data-mode="month">Month</button>
+      </div>
+      <div class="effchart" id="effChart"></div>
+      <div class="legend"><span><i class="lp"></i>Produced</span><span><i class="lh"></i>Home</span><span><i class="le"></i>EV charging</span><span id="luKey"><i class="lu"></i>Home incl. EV (before car bridge)</span></div>
+    </div>
+  </section>
+
+  <section id="today" class="col-right" aria-label="Today">
+    <div class="card">
+      <div class="lbl"><span>Today's solar</span><span id="excessSub"></span></div>
+      <div class="sunchart" id="sunChart"></div>
+      <div class="legend"><span><i class="ls"></i>Solar</span><span><i class="ll"></i>House + car</span><span><i class="lx"></i>Excess forecast</span></div>
+    </div>
+    <div class="card kv" id="live"></div>
+  </section>
+
+  <section id="cars" class="col-right" aria-label="Cars">
+    <div id="carCards"></div>
+    <div id="advice" class="advice" hidden></div>
+  </section>
+</main>
+
+<nav class="tabs" aria-label="Screens">
+  <button type="button" data-tab="eff">Efficiency</button>
+  <button type="button" data-tab="today">Today</button>
+  <button type="button" data-tab="cars">Cars</button>
+</nav>
+
+<div id="night" hidden><div id="clock"></div><div id="nightSub"></div></div>
+
+<script src="app.js"></script>
+</body>
+</html>

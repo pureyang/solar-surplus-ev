@@ -12,6 +12,9 @@ export const config = {
   port: Number(env.PORT || 8787),
   // 127.0.0.1 = this PC only. Set HOST=0.0.0.0 to view from phones on your LAN.
   host: env.HOST || '127.0.0.1',
+  // Other devices (phone, tablet app) must send this key once: http://<pc-ip>:8787/app/?key=...
+  // This PC (127.0.0.1) never needs it. Empty = other devices are refused.
+  appKey: env.APP_KEY || '',
   preferred: (env.PREFERRED_SOURCE || 'local').toLowerCase(),
   fallbackAfterS: Number(env.FALLBACK_AFTER_S || 10),
   // Keep every per-second row forever (~20 GB/yr). Off: per-second rows are kept for the last

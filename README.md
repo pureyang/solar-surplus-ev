@@ -209,6 +209,30 @@ Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's
 `EV_AUTO_CONTROL=0` turns control off; the advisor then posts "start / stop / set N A" messages instead
 (dashboard, plus phone with `NOTIFY=1`), at most one per `NOTIFY_MIN_INTERVAL_MIN`.
 
+## Tablet and phone app
+
+`http://<this computer's IP>:8787/app/` is a touch app for a wall tablet or a phone (Android or iPhone):
+
+- **Efficiency first:** share of today's, the last 7 days' and this month's solar used at home
+  (`1 − exported ÷ produced`). Below that, one chart with Day / Week / Month bars: solar produced
+  with home use and EV charging stacked in front of it.
+- **Today:** solar and house use so far, the forecast for the rest of the day with the excess shaded,
+  and live power.
+- **Cars:** each car's battery and limit, and the swap advice once the plugged-in car is full.
+- **Tablet:** in landscape everything is on one screen. The screen stays on, and from 10 PM to 6 AM
+  it shows a dim clock (tap to wake).
+
+Setup:
+
+1. In `.env`, set `HOST=0.0.0.0` and `APP_KEY=` to a random word, then restart.
+2. On the tablet or phone, on the same Wi-Fi, open `http://<this computer's IP>:8787/app/?key=<APP_KEY>`
+   once. The key is saved in a cookie, so the plain `/app/` link works from then on.
+3. Add it to the home screen. Android: Chrome menu > **Add to home screen**. iPhone/iPad: Safari
+   Share > **Add to Home Screen**.
+
+Other devices on your network get nothing without the key (401). This computer never needs it.
+Use a fixed IP for the computer (a DHCP reservation in your router) so the link keeps working.
+
 ## Settings (`.env`)
 
 | Key | Default | Meaning |
@@ -240,6 +264,8 @@ Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's
 | `NIGHT_CHARGE_FROM` / `_UNTIL` | 00:00 / 07:00 | Night top-off window (local time; PG&E EV2-A / E-ELEC off-peak starts at midnight) |
 | `NIGHT_CHARGE_WINTER_MAX` | 70 | Oct-May: night top-off stops at this % if below the car's limit (0 = off) |
 | `TESLA_BLE_HOST` / `_USER` / `_PASSWORD` | | Bridge address and web login |
+| `HOST` | 127.0.0.1 | 0.0.0.0 = reachable from the tablet / phone app on your LAN |
+| `APP_KEY` | | Key other devices need once for the app (see [Tablet and phone app](#tablet-and-phone-app)) |
 | `NTFY_TOPIC` | auto | Push topic (generated if blank; setting it also turns on `NOTIFY`) |
 
 ## Data sources
