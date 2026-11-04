@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.js",
-    "probe": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/probe.js"
+    "probe": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/probe.js",
+    "tapo": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/tapo-test.js",
+    "tapo:setup": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/tapo-setup.js"
   },
   "dependencies": {
     "mqtt": "5.10.4",

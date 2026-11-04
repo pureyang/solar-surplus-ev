@@ -49,6 +49,7 @@ export class Controller {
     this.restUntil = saved.restUntil ?? 0;   // no restart before this (set when we stop a session)
     this.carKey = saved.carKey ?? null;      // car the session state above belongs to (two cars, one bridge)
     this.exportTicks = 0;
+    this.extraLoadW = () => 0;                // lower-priority loads we run (attic fan): the car gets that solar first
     this.targets = [];                        // recent target amps while charging, for smoothing
     this.lastTick = 0;
     this.startCount = 0;
@@ -131,7 +132,7 @@ export class Controller {
     if (r.n < config.control.intervalS / 2) return set('Not enough live gateway data');
     const volts = car.voltage > 180 ? car.voltage : 240;
     const carW = car.charging ? (car.current ?? amps) * volts : 0;
-    const excessW = r.pv - (r.load - carW);  // solar beyond the house, car excluded
+    const excessW = r.pv - (r.load - carW - this.extraLoadW());  // solar beyond the house, car (and attic fan) excluded
     const exportW = Math.max(0, -r.grid);
     const importW = Math.max(0, r.grid);
 

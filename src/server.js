@@ -15,6 +15,8 @@ import { CarSwitcher } from './cars.js';
 import { notify, ntfyUrl } from './notify.js';
 import { log } from './log.js';
 import { quiet } from './quiet.js';
+import { TapoHub } from './sources/tapo-hub.js';
+import { Fan } from './fan.js';
 
 const collector = new Collector();
 collector.start();
@@ -30,6 +32,14 @@ advisor.start();
 const controller = new Controller(collector, tesla, advisor);
 advisor.controller = controller;
 controller.start();
+
+// Tapo plugs on the LAN; the attic fan runs on summer solar excess, after the car.
+const tp = config.tapo;
+const fanDevice = tp.email && tp.password && (tp.devices.length || tp.discover)
+  ? new TapoHub({ email: tp.email, password: tp.password, devices: tp.devices, want: config.fan.device, discovery: tp.discover }) : null;
+const fan = new Fan(advisor, fanDevice);
+controller.extraLoadW = () => fan.runningW();
+fan.start();
 
 // Per-microinverter 15-min energy: backfill from whatever raw reports exist, then keep it current.
 setTimeout(() => { try { store.syncInverter15m(0); } catch (e) { log.warn('array', e.message); } }, 15_000);
@@ -200,7 +210,7 @@ const routes = {
     const advice = full ? controller.swapAdvice(now, { car: active.key, voltage: active.voltage, carName: active.name }).trim() : '';
     const p = advisor.last?.plan;
     sendJson(res, {
-      at: now, cars: list, activeCar: active?.key ?? null, switcher: cars.status, control: controller.status, advice,
+      at: now, cars: list, activeCar: active?.key ?? null, switcher: cars.status, control: controller.status, advice, fan: fan.status,
       plan: p && { ok: p.ok, reason: p.reason, soc: p.soc, solarEnd: p.solarEnd, best: p.best, steps: (p.steps || []).map((st) => ({ ts: st.ts, pv: st.pv, load: st.load })) },
     });
   },

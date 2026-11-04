@@ -209,6 +209,42 @@ Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's
 `EV_AUTO_CONTROL=0` turns control off; the advisor then posts "start / stop / set N A" messages instead
 (dashboard, plus phone with `NOTIFY=1`), at most one per `NOTIFY_MIN_INTERVAL_MIN`.
 
+## Attic fan on a Tapo plug
+
+Runs a fan only in summer, only in daylight, and only on solar that would otherwise go to the grid.
+
+1. Update the plug's firmware in the Tapo app and give it a name there (for example "Attic fan").
+2. In a terminal in the project folder: `npm run tapo:setup`. It asks for your Tapo account email and
+   password (hidden), searches the network for Tapo devices, lists them by their app names, and asks which
+   one runs the fan. It saves `TAPO_EMAIL`, `TAPO_PASSWORD` and `ATTIC_FAN_DEVICE` to `.env`.
+3. `npm run tapo` logs in to that plug and prints its state and power (`-- --list` shows every Tapo device
+   found). It switches nothing unless you pass `-- --toggle`, which flips the fan plug once and back.
+4. Restart. The fan is managed automatically; `/api/app` shows `fan` with the reason for its last decision.
+
+No IP address needed: the server finds the plug by its Tapo app name on every start and again if it stops
+answering (the router gave it a new address), at most every 10 minutes. Discovery uses TP-Link's local
+broadcast (UDP 20002) plus a handshake probe of your /24 subnet, so this computer must be on the same
+Wi-Fi/LAN as the plug; a router with client isolation, or a phone hotspot, will not work. To pin an address
+instead, set `TAPO_DEVICES=attic-fan=<plug ip>`; `TAPO_DISCOVER=0` turns searching off.
+
+Rules (checked every `ATTIC_FAN_INTERVAL_S`, default 60 s):
+
+- **Season:** months in `ATTIC_FAN_MONTHS` (default `6-9`, PG&E summer). Outside them the fan is left alone.
+- **Start:** house battery at `ATTIC_FAN_MIN_SOC` (95%) or more, and solar minus house load covers the fan
+  plus 150 W, three minutes in a row, and it has been off for `ATTIC_FAN_MIN_OFF_MIN` (5).
+- **Stop:** the house imports from the grid for three minutes, the battery drops 5 points below the minimum,
+  the sun goes down, or the season ends. A fan that ran under 10 minutes (`ATTIC_FAN_MIN_ON_MIN`) waits
+  out the minimum unless the sun is down.
+- **Priority:** the car gets solar first: the fan's draw is left out of the load the car controller sees,
+  so a car that needs the power starts, the grid import appears, and the fan stops.
+- **Yours stays yours:** it only switches off a fan it switched on. If you turn the plug on in the Tapo
+  app, it is left alone. A plug that can't be reached is logged once and retried.
+- **Fan watts:** `ATTIC_FAN_WATTS` (250) until the plug reports real power (P110 / P115 do).
+
+If the fan has its own thermostat, leave it in line: the plug only supplies power, the thermostat still decides.
+
+Uses the plug's local KLAP protocol (no cloud). Plugs on older "securePassthrough" firmware are not supported.
+
 ## Tablet and phone app
 
 `http://<this computer's IP>:8787/app/` is a touch app for a wall tablet or a phone (Android or iPhone):

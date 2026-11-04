@@ -4,6 +4,19 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = process.env;
 
+// "6-9" or "5,6,7,8,9" or "11-2" (wraps the year) -> sorted month numbers 1-12
+function parseMonths(s) {
+  const out = new Set();
+  for (const part of String(s).split(',')) {
+    const m = /^\s*(\d{1,2})\s*(?:-\s*(\d{1,2}))?\s*$/.exec(part);
+    if (!m) continue;
+    const a = Number(m[1]), b = m[2] == null ? a : Number(m[2]);
+    if (a < 1 || a > 12 || b < 1 || b > 12) continue;
+    for (let k = a; ; k = k % 12 + 1) { out.add(k); if (k === b) break; }
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
 export const config = {
   root,
   dataDir: path.join(root, 'data'),
@@ -99,5 +112,27 @@ export const config = {
     inverterPollMs: Math.max(1000, Number(env.QUIET_INVERTER_POLL_MS || 900_000)),
     carDwellS: Math.max(60, Number(env.QUIET_CAR_DWELL_S || 600)),  // per car, while neither is plugged in
     evSampleS: Math.max(10, Number(env.QUIET_EV_SAMPLE_S || 60)),   // ev_samples row spacing
+  },
+  // Tapo smart plugs (src/sources/tapo.js) and the attic fan on one of them (src/fan.js).
+  tapo: {
+    email: env.TAPO_EMAIL || '',
+    password: env.TAPO_PASSWORD || '',
+    // Find plugs by their Tapo app name instead of a fixed IP (src/sources/tapo-discover.js)
+    discover: !['0', 'false', 'off'].includes(String(env.TAPO_DISCOVER ?? '1').toLowerCase()),
+    // Optional fixed "name=ip" pairs, e.g. TAPO_DEVICES=attic-fan=192.168.1.60,heater=192.168.1.61
+    devices: String(env.TAPO_DEVICES || '').split(',').map((s) => s.trim()).filter(Boolean).map((s) => {
+      const i = s.lastIndexOf('=');
+      return i > 0 ? { name: s.slice(0, i).trim(), host: s.slice(i + 1).trim() } : { name: s, host: s };
+    }),
+  },
+  fan: {
+    device: env.ATTIC_FAN_DEVICE || '',   // plug name as shown in the Tapo app (default: the only plug found)
+    enabled: !['0', 'false', 'off'].includes(String(env.ATTIC_FAN_AUTO ?? '1').toLowerCase()),
+    months: parseMonths(env.ATTIC_FAN_MONTHS || '6-9'),  // PG&E summer: June-September
+    watts: Number(env.ATTIC_FAN_WATTS || 250),           // used until the plug reports real power (P110)
+    minSoc: Number(env.ATTIC_FAN_MIN_SOC || 95),         // house battery must be this full first
+    minOnMin: Number(env.ATTIC_FAN_MIN_ON_MIN || 10),    // protect the motor from short cycles
+    minOffMin: Number(env.ATTIC_FAN_MIN_OFF_MIN || 5),
+    intervalS: Math.max(30, Number(env.ATTIC_FAN_INTERVAL_S || 60)),
   },
 };
