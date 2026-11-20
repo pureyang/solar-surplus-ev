@@ -5,6 +5,7 @@
 // Below FULL_SOC it follows the advisor's plan (which leaves the house battery enough solar to reach
 // target), capped at real excess. At/above FULL_SOC it tracks live excess minute by minute.
 // A manual change in the Tesla app pauses control for EV_OVERRIDE_MIN.
+// Commands only go to a car with a real Bluetooth link (a BLE signal), never on the bridge's remembered values.
 // Smoothing: during a short dip the car holds at min amps on a small loan from the house battery
 // (EV_LOAN_WH a day, repaid from solar before the car gets more), and a plan that only pushes the
 // window back by <= STICKY_S doesn't stop a running session. State survives restarts (ev_state.json).
@@ -16,6 +17,7 @@ import { config } from './config.js';
 import { db, writeNotification, writeControlLog } from './db.js';
 import { notify } from './notify.js';
 import { log } from './log.js';
+import { nightAsk } from './nightRetry.js';
 
 const FULL_SOC = 95;
 const MARGIN_W = 150;      // headroom so the car isn't the reason for a small import
@@ -49,6 +51,7 @@ export class Controller {
     this.restUntil = saved.restUntil ?? 0;   // no restart before this (set when we stop a session)
     this.carKey = saved.carKey ?? null;      // car the session state above belongs to (two cars, one bridge)
     this.exportTicks = 0;
+    this.nightAsks = {};                      // per car: last night-time start/raise it hasn't taken yet
     this.targets = [];                        // recent target amps while charging, for smoothing
     this.lastTick = 0;
     this.startCount = 0;
@@ -88,17 +91,20 @@ export class Controller {
     try { await this.step(); } finally {
       this.persist();
       if (this.status.at) {
-        try { writeControlLog(this.status.at, this.status, this.tesla.live()); } catch (e) { log.warn('control', `decision log: ${e.message}`); }
+        try { writeControlLog(this.status.at, this.status, this.tesla.linked()); } catch (e) { log.warn('control', `decision log: ${e.message}`); }
       }
     }
   }
 
   async step() {
     const now = Math.floor(Date.now() / 1000);
-    const car = this.tesla.live();
+    // Only a car with a real Bluetooth link: the bridge's "BLE Connection" switch stays on with no car in range, and it
+    // replays remembered values, so commands sent on those reach no car (483 in one day before this check).
+    const car = this.tesla.linked();
     const set = (reason, extra = {}) => { this.status = { enabled: true, active: false, at: now, reason, car: car && car.carName, ...extra }; };
     if (config.control.from && new Date().toLocaleDateString('en-CA') < config.control.from) return set(`Starts ${config.control.from}`);
-    if (!car) return set('Car not reachable over Bluetooth');
+    if (!this.nightWindow(now)) this.nightAsks = {};
+    if (!car) return set(`No Bluetooth link to ${this.tesla.car().name}`);
     // The bridge moved to the other car: what we knew about the session belongs to the old one.
     if (this.carKey !== car.car) {
       if (this.carKey) log.info('control', `now controlling ${car.carName}`);
@@ -108,8 +114,11 @@ export class Controller {
     }
     await this.watchTransitions(now, car);
     await this.manageLimit(now, car).catch((e) => log.warn('control', `charge limit: ${e.message}`));
+    // Just linked: wait for the car's own state rather than act on half a reading.
+    if (car.state == null || car.pluggedIn == null) return set(`Waiting for ${car.carName} to report its charging state`);
     if (car.pluggedIn === false || ['Complete', 'Disconnected'].includes(car.state)) {
       this.expect = null; this.ownSession = false;
+      delete this.nightAsks[car.car];
       return set(car.pluggedIn === false ? 'Car not plugged in' : `Car ${car.state}`);
     }
 
@@ -147,9 +156,15 @@ export class Controller {
         if (car.charging && this.ownSession) return this.command(now, car, 0, `Night top-off: car reached ${target}%`, info);
         return set(`Night top-off: car at ${target}% (${target === car.limit ? 'its limit' : 'winter cap'})`, round(info));
       }
-      // Raise once to max; if the car/charger caps lower, don't re-send every tick.
+      // Raise once to max; if the car/charger caps lower, don't re-send every tick. A start or raise the car
+      // doesn't take is asked again after 15, 30, then every 60 min, not every tick.
       const sentMax = this.expect && this.expect.charging && this.expect.amps === config.ev.maxAmps;
-      if (!car.charging || (amps < config.ev.maxAmps && !sentMax)) return this.command(now, car, config.ev.maxAmps, why, info);
+      if (!car.charging || (amps < config.ev.maxAmps && !sentMax)) {
+        const ask = nightAsk(this.nightAsks, car.car, now);
+        if (!ask.ok) return set(`${why}: ${car.charging ? `car still at ${amps} A` : 'car hasn\'t started'}; asking again at ${clock(ask.at)}`, round(info));
+        return this.command(now, car, config.ev.maxAmps, why, info);
+      }
+      delete this.nightAsks[car.car];
       set(`${why}, ${amps} A to ${target ?? '?'}%`, round(info));
       this.status.active = true;
       return;

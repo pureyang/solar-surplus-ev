@@ -160,7 +160,15 @@ One NanoC6 can serve two Teslas that share a charger. The bridge talks to one ca
   which the bridge reads without waking the car.
 - **Locked**: as soon as a car's charge port is open (cable in), the bridge stays with it until the
   port closes. Control, messages ("Model Y: EV charging started …") and the charge-limit raise follow
-  that car.
+  that car. If its Bluetooth link drops, the bridge waits 10 minutes for it to come back before searching.
+
+Only a real link counts, meaning the bridge reports a Bluetooth signal for the car. Its "BLE Connection"
+switch stays on with no car nearby, and it remembers the last values it read, so neither one is used to
+decide anything or to send a command.
+
+If neither car links for days while they're parked at home, restart the bridge (the **Restart** button on its
+web page, or unplug it for a few seconds). On Nov 10, 2026 its Bluetooth had been stuck for 10 days, and the
+car it was set to linked within seconds of a restart.
 
 Setup:
 
@@ -174,7 +182,9 @@ Setup:
 
 Only runs when the Tesla bridge is set up.
 
-Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's amps. Priorities:
+Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's amps. It only sends a
+command to a car with a real Bluetooth link, after the car has reported its own charging state.
+Priorities:
 
 1. **Use all excess solar.** If the house is exporting and the car can take more, amps go up.
 2. **Then minimise grid use.** The car never charges from the house battery or the grid: amps are
@@ -201,7 +211,8 @@ Every `EV_CONTROL_INTERVAL_S` (default 60 s), `src/controller.js` sets the car's
   own charge limit (Oct-May: `NIGHT_CHARGE_WINTER_MAX`, default 70%, if lower; the session is stopped there,
   the car's limit isn't changed, and daytime solar can still take it to the limit). This is the one exception to "never from the house battery": any charge the battery
   still has at midnight goes to the car first. At the end of the window, solar control takes over (or, if
-  it's still dark, the session is stopped).
+  it's still dark, the session is stopped). Nothing changes fast at night, so a start the car doesn't take
+  is asked again after 15 minutes, then 30, then once an hour, instead of every minute.
 - A change in the Tesla app pauses control for `EV_OVERRIDE_MIN` (default 120).
 - Messages when charging starts (with the expected ending car battery %) and when it stops: on the
   dashboard, and on your phone with `NOTIFY=1`.
