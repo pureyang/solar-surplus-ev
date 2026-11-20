@@ -71,6 +71,13 @@ final class Store {
         }
     }
 
+    /// One period for the graphs, nil if no address answered. Starts with the address the live reading uses.
+    func loadPeriod(span: String, day: String) async -> DayData? {
+        guard settings.isConfigured else { return nil }
+        let bases = (route.map { [$0] } ?? []) + settings.routes.filter { $0 != route }
+        return await client.fetchPeriod(bases: bases, key: settings.key, span: span, day: day)
+    }
+
     func saveCache() {
         guard let snapshot, let fetchedAt else { return }
         cache.save(.init(snapshot: snapshot, fetchedAt: fetchedAt))

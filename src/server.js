@@ -14,6 +14,7 @@ import { Controller } from './controller.js';
 import { CarSwitcher } from './cars.js';
 import { notify, ntfyUrl } from './notify.js';
 import { MobileStatus } from './mobile.js';
+import { periodBounds, buildPeriod } from './mobilePeriod.js';
 import { ChargeWatch } from './chargeWatch.js';
 import { apnsConfigured, deviceCount, pushToDevices, registerDevice } from './apns.js';
 import { log } from './log.js';
@@ -216,6 +217,11 @@ const routes = {
   },
   // iPhone app (ios/): home and car state under the real-link rules (src/mobile.js).
   '/api/mobile': (req, res) => sendJson(res, mobile.snapshot()),
+  // iPhone app graphs: ?span=day|week|month|year (default day) and ?day=YYYY-MM-DD inside the period (default today).
+  '/api/mobile/day': (req, res, q) => {
+    const p = periodBounds(q.get('span'), q.get('day'));
+    sendJson(res, buildPeriod({ ...p, series: store.series(p.from, p.to, p.res), energy: store.energy(p.from, p.to), evRows: store.evEnergy(p.from, p.to, p.res) }));
+  },
   // Body: { token, env, name }, from the app once iOS gives it a push token.
   '/api/mobile/device': async (req, res) => {
     if (req.method !== 'POST') return sendJson(res, { error: 'POST only' }, 405);

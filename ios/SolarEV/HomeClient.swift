@@ -78,6 +78,22 @@ struct HomeClient: Sendable {
         return try? JSONDecoder().decode(TestPushResult.self, from: data)
     }
 
+    /// One period for the graphs. Tries the addresses in order (the one that last worked comes first).
+    func fetchPeriod(bases: [URL], key: String, span: String, day: String) async -> DayData? {
+        for base in bases {
+            var components = URLComponents(url: base.appending(path: "api/mobile/day"), resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "span", value: span), URLQueryItem(name: "day", value: day)]
+            guard let url = components?.url else { continue }
+            var request = URLRequest(url: url)
+            request.setValue(key, forHTTPHeaderField: "X-App-Key")
+            guard let (data, response) = try? await session.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let decoded = try? JSONDecoder().decode(DayData.self, from: data) else { continue }
+            return decoded
+        }
+        return nil
+    }
+
     private func post(base: URL, key: String, path: String, body: [String: String]) async -> (Int, Data)? {
         var request = URLRequest(url: base.appending(path: path))
         request.httpMethod = "POST"

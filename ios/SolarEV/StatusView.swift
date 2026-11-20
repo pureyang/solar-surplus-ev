@@ -22,6 +22,13 @@ struct StatusView: View {
             .refreshable { await store.refresh() }
             .navigationTitle("Solar EV")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        GraphsView(store: store)
+                    } label: {
+                        Label("Graphs", systemImage: "chart.xyaxis.line")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Settings", systemImage: "gearshape") { showSettings = true }
                 }

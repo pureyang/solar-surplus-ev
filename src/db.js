@@ -197,6 +197,20 @@ export function evSeries(fromSec, toSec) {
   return db.prepare('SELECT * FROM ev_samples WHERE ts >= ? AND ts < ? ORDER BY ts').all(fromSec, toSec);
 }
 
+// Real EV charging energy per bucket, for the iPhone graphs (src/mobilePeriod.js): [{ b, wsec }].
+// Only rows with a numeric rssi (a real Bluetooth link). Each row counts for the gap to the next real row, capped at
+// 70 s (rows come every 10 s, every 60 s in quiet mode), so a dropped link isn't stretched. Buckets match series().
+export function evEnergy(fromSec, toSec, res) {
+  const off = res >= 86400 ? localOffset() : 0;
+  return db.prepare(`WITH r AS (
+      SELECT ts,
+        CASE WHEN charging THEN CASE WHEN current IS NOT NULL AND voltage > 180 THEN current * voltage ELSE COALESCE(power_w, 0) END ELSE 0 END AS w,
+        MIN(COALESCE(LEAD(ts) OVER (ORDER BY ts), ts + 10) - ts, 70) AS dt
+      FROM ev_samples WHERE ts >= ? AND ts < ? AND rssi IS NOT NULL)
+    SELECT ((ts + CAST(? AS INTEGER)) / CAST(? AS INTEGER)) * CAST(? AS INTEGER) - CAST(? AS INTEGER) AS b, SUM(w * dt) AS wsec
+    FROM r GROUP BY b ORDER BY b`).all(fromSec, toSec, off, res, res, off);
+}
+
 // Car start/stop/limit events for chart markers.
 export function evEvents(fromSec, toSec) {
   return db.prepare(`SELECT ts, kind, title, body, amps FROM notifications

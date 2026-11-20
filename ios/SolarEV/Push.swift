@@ -69,6 +69,11 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         Push.registrationError = error.localizedDescription
     }
 
+    /// Portrait everywhere except the full-screen chart, which turns landscape (OrientationLock).
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+
     /// Show the banner even with the app open.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
