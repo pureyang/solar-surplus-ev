@@ -275,7 +275,9 @@ Run the install again to renew it, and your settings are kept.
 ### Turn on iPhone notifications (paid membership)
 
 1. At [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list), create a key with
-   **Apple Push Notifications service** turned on and download the `.p8` file to `data/apns/`.
+   **Apple Push Notifications service** turned on. Set **Environment** to **Sandbox & Production** and **Key
+   Restriction** to **Team Scoped**: installs from the Mac use Apple's sandbox, and a production-only key gets
+   `BadEnvironmentKeyInToken`. Download the `.p8` file to `data/apns/`.
 2. In `.env`, set these, then restart the server:
    ```
    APNS_KEY_FILE=data/apns/AuthKey_XXXXXXXXXX.p8

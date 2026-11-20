@@ -86,6 +86,14 @@ async function deliver(device, payload, headers) {
   return r;
 }
 
+// Apple's reasons that mean the server's setup is wrong, in words that say what to fix.
+const SETUP_HINTS = {
+  BadEnvironmentKeyInToken: 'the push key is limited to one Apple environment. Make a new key set to Sandbox & Production',
+  InvalidProviderToken: 'APNS_KEY_ID, APNS_TEAM_ID and the .p8 file don\'t belong together',
+  DeviceTokenNotForTopic: 'APNS_TOPIC doesn\'t match the app\'s bundle id',
+  TopicDisallowed: 'APNS_TOPIC isn\'t allowed for this key',
+};
+
 // Never throws. Returns { sent, error }, where sent counts the phones Apple accepted.
 export async function pushToDevices({ title, body, collapseId }) {
   if (!apnsConfigured()) return { sent: 0, error: 'APNs key is not set up on the server' };
@@ -101,5 +109,7 @@ export async function pushToDevices({ title, body, collapseId }) {
   const results = await Promise.all(devices.map((d) => deliver(d, payload, headers).catch((e) => ({ status: 0, reason: (e.cause && e.cause.code) || e.code || e.message }))));
   const sent = results.filter((r) => r.status === 200).length;
   const failed = results.find((r) => r.status !== 200);
-  return { sent, error: failed ? `APNs ${failed.status || ''} ${failed.reason || ''}`.replace(/\s+/g, ' ').trim() : null };
+  const hint = failed && SETUP_HINTS[failed.reason];
+  const error = failed ? `APNs ${failed.status || ''} ${failed.reason || ''}${hint ? `: ${hint}` : ''}`.replace(/\s+/g, ' ').trim() : null;
+  return { sent, error };
 }
