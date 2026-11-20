@@ -13,6 +13,9 @@ import { TeslaSource } from './sources/tesla.js';
 import { Controller } from './controller.js';
 import { CarSwitcher } from './cars.js';
 import { notify, ntfyUrl } from './notify.js';
+import { MobileStatus } from './mobile.js';
+import { ChargeWatch } from './chargeWatch.js';
+import { apnsConfigured, deviceCount, pushToDevices, registerDevice } from './apns.js';
 import { log } from './log.js';
 import { quiet } from './quiet.js';
 
@@ -30,6 +33,13 @@ advisor.start();
 const controller = new Controller(collector, tesla, advisor);
 advisor.controller = controller;
 controller.start();
+const mobile = new MobileStatus({ collector, tesla, store, pushInfo: () => ({ configured: apnsConfigured(), devices: deviceCount() }) });
+tesla.on('sample', (ts, e) => mobile.onSample(ts, e));
+new ChargeWatch({
+  tesla, cars: config.tesla.cars, notify, record: store.writeNotification,
+  message: (now, car) => controller.startMessage(now, car),
+  file: path.join(config.dataDir, 'charge-watch.json'), cooldownS: config.ev.chargePushCooldownMin * 60,
+}).start();
 
 // Per-microinverter 15-min energy: backfill from whatever raw reports exist, then keep it current.
 setTimeout(() => { try { store.syncInverter15m(0); } catch (e) { log.warn('array', e.message); } }, 15_000);
@@ -203,6 +213,19 @@ const routes = {
       at: now, cars: list, activeCar: active?.key ?? null, switcher: cars.status, control: controller.status, advice,
       plan: p && { ok: p.ok, reason: p.reason, soc: p.soc, solarEnd: p.solarEnd, best: p.best, steps: (p.steps || []).map((st) => ({ ts: st.ts, pv: st.pv, load: st.load })) },
     });
+  },
+  // iPhone app (ios/): home and car state under the real-link rules (src/mobile.js).
+  '/api/mobile': (req, res) => sendJson(res, mobile.snapshot()),
+  // Body: { token, env, name }, from the app once iOS gives it a push token.
+  '/api/mobile/device': async (req, res) => {
+    if (req.method !== 'POST') return sendJson(res, { error: 'POST only' }, 405);
+    const ok = registerDevice(await readBody(req));
+    sendJson(res, { ok }, ok ? 200 : 400);
+  },
+  '/api/mobile/test-push': async (req, res) => {
+    if (req.method !== 'POST') return sendJson(res, { error: 'POST only' }, 405);
+    const r = await pushToDevices({ title: 'Solar Surplus EV test', body: 'Charging notifications are working.' });
+    sendJson(res, { ok: r.sent > 0, sent: r.sent, error: r.error });
   },
   // Daily produced / consumed / exported / EV Wh for the efficiency view: ?days=N (default 400)
   '/api/efficiency': (req, res, q) => sendJson(res, store.dailyEfficiency(Math.min(800, Math.max(1, Number(q.get('days')) || 400)))),

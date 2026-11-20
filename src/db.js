@@ -180,6 +180,19 @@ const lastCar = db.prepare(`SELECT ts, battery, charge_limit AS "limit", plugged
 export function lastCarSample(key) {
   return lastCar.get(key) || null;
 }
+// Each car's last real evidence, same rules as /ev-health: only a numeric rssi proves the Bluetooth link was up, and
+// a SOC also needs the next row to be the same car with the same value. Slow on a big table, so call it at startup only.
+const lastLink = db.prepare('SELECT ts, rssi FROM ev_samples WHERE car = ? AND rssi IS NOT NULL ORDER BY ts DESC LIMIT 1');
+const lastSoc = db.prepare(`SELECT ts, battery, charge_limit AS "limit" FROM (
+    SELECT ts, car, battery, charge_limit, rssi, LEAD(car) OVER w AS ncar, LEAD(battery) OVER w AS nbat FROM ev_samples WINDOW w AS (ORDER BY ts))
+  WHERE car = ? AND rssi IS NOT NULL AND battery IS NOT NULL AND ncar = car AND nbat = battery ORDER BY ts DESC LIMIT 1`);
+export function lastRealCar(key) {
+  return { link: lastLink.get(key) || null, soc: lastSoc.get(key) || null };
+}
+const lastHome = db.prepare('SELECT ts, soc FROM samples WHERE soc IS NOT NULL ORDER BY ts DESC LIMIT 1');
+export function lastHomeReading() {
+  return lastHome.get() || null;
+}
 export function evSeries(fromSec, toSec) {
   return db.prepare('SELECT * FROM ev_samples WHERE ts >= ? AND ts < ? ORDER BY ts').all(fromSec, toSec);
 }

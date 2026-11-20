@@ -46,6 +46,16 @@ export const config = {
     notify: env.NOTIFY != null && env.NOTIFY !== '' ? ['1', 'true', 'on'].includes(String(env.NOTIFY ?? '').toLowerCase()) : Boolean(env.NTFY_TOPIC),
     ntfyTopic: env.NTFY_TOPIC || '',
     ntfyServer: env.NTFY_SERVER || 'https://ntfy.sh',
+    // A car must have been off charge this long before another "charging started" push (unplugging resets it).
+    chargePushCooldownMin: Number(env.CHARGE_PUSH_COOLDOWN_MIN ?? 60),
+  },
+  // iPhone app pushes through Apple (src/apns.js). Off until all of these are set.
+  apns: {
+    keyFile: env.APNS_KEY_FILE || '',   // .p8 from developer.apple.com; a relative path starts at the project folder
+    keyId: env.APNS_KEY_ID || '',
+    teamId: env.APNS_TEAM_ID || '',
+    topic: env.APNS_TOPIC || '',        // the app's bundle id
+    host: env.APNS_HOST || '',          // tests only: replaces Apple's server
   },
   // ESPHome Tesla BLE bridge (esphome/tesla-ble.yaml)
   tesla: {

@@ -49,6 +49,10 @@ function parseValue(d) {
   return d.value ?? d.state ?? null;
 }
 
+// Is the car really charging? current().charging also counts stray current, such as a finished car in state
+// 'Complete' drawing 3 A at 0 kW, which is what the controller's own bookkeeping wants but isn't what a person means.
+export const reallyCharging = (car) => car?.state === 'Charging';
+
 export class TeslaSource extends EventEmitter {
   constructor() {
     super();
@@ -169,6 +173,16 @@ export class TeslaSource extends EventEmitter {
   setCharging(on) { return this.post(`switch/Charger/${on ? 'turn_on' : 'turn_off'}`); }
   forceUpdate() { return this.post(`button/${encodeURIComponent('Force data update')}/press`); }
   setActiveCar(key) { return this.post(`select/${encodeURIComponent('Active Car')}/set?option=${encodeURIComponent(key)}`); }
+
+  // The car we have a real Bluetooth link to right now, or null. live() can't tell: the "BLE Connection" switch
+  // stays ON with no car present and remembered values still arrive. Only the BLE Signal sensor (rssi) is a number
+  // just while the link is up, and its last value means nothing once the stream from the bridge has stopped.
+  linked(maxAgeMs = 120_000) {
+    const s = this.state;
+    if (this.status.state !== 'ok' || Date.now() - this.status.lastEventAt >= maxAgeMs) return null;
+    if (typeof s.rssi !== 'number' || s.pairingRequired) return null;
+    return this.current();
+  }
 
   // Fresh reading for the advisor, or null if the bridge is offline or not talking to the car.
   live(maxAgeMs = 120_000) {

@@ -364,28 +364,32 @@ export class Controller {
       priority: 3, tags: ['red_car', 'sunny'] });
   }
 
-  // Push when the car starts or stops charging, whoever caused it (us, the Tesla app, or the car at its limit).
+  // Who changed the car's charging: us, the Tesla app, or the car at its limit.
+  whoChanged(now, car) {
+    const ours = this.expect && now - this.expect.ts < 180 && this.expect.charging === car.charging;
+    return ours ? 'auto control' : car.state === 'Complete' ? 'car reached its charge limit' : 'Tesla app / car';
+  }
+
+  // Push when the car stops charging, whoever caused it. Starts are pushed by ChargeWatch, using startMessage below.
   async watchTransitions(now, car) {
     const was = this.wasCharging;
     this.wasCharging = car.charging;
-    if (was == null || was === car.charging) return;
-    const ours = this.expect && now - this.expect.ts < 180 && this.expect.charging === car.charging;
-    const who = ours ? 'auto control' : car.state === 'Complete' ? 'car reached its charge limit' : 'Tesla app / car';
+    if (was == null || was === car.charging || car.charging) return;
     const added = car.energyAdded != null ? ` ${car.energyAdded.toFixed(1)} kWh added this session.` : '';
-    let title, body;
-    if (car.charging) {
-      const amps = Math.round(car.ampsSet ?? car.current ?? 0);
-      const exp = this.expectedCarSoc(now, car);
-      title = `${carTag(car)}EV charging started at ${amps} A`;
-      body = `Started by ${who}. Car battery ${car.battery ?? '?'}%`
+    let body = `Stopped by ${this.whoChanged(now, car)}. Car battery ${car.battery ?? '?'}%.${added}`;
+    if (car.state === 'Complete') body += this.swapAdvice(now, car);
+    await notify({ kind: 'EV_STOPPED', title: `${carTag(car)}EV charging stopped`, body, priority: 3, tags: ['red_car', 'no_entry'] });
+  }
+
+  startMessage(now, car) {
+    const amps = Math.round(car.ampsSet ?? car.current ?? 0);
+    const exp = this.expectedCarSoc(now, car);
+    return {
+      title: `${carTag(car)}EV charging started at ${amps} A`,
+      body: `Started by ${this.whoChanged(now, car)}. Car battery ${car.battery ?? '?'}%`
         + (exp ? `, expected ~${exp.soc}% when solar charging ends around ${exp.at}` : '')
-        + ` (limit ${car.limit ?? '?'}%).`;
-    } else {
-      title = `${carTag(car)}EV charging stopped`;
-      body = `Stopped by ${who}. Car battery ${car.battery ?? '?'}%.${added}`;
-      if (car.state === 'Complete') body += this.swapAdvice(now, car);
-    }
-    await notify({ kind: car.charging ? 'EV_STARTED' : 'EV_STOPPED', title, body, priority: 3, tags: ['red_car', car.charging ? 'electric_plug' : 'no_entry'] });
+        + ` (limit ${car.limit ?? '?'}%).`,
+    };
   }
 
   // Two cars: when one finishes, is there enough excess solar left today to make swapping in the other worth it?

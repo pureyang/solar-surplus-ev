@@ -233,6 +233,63 @@ Setup:
 Other devices on your network get nothing without the key (401). This computer never needs it.
 Use a fixed IP for the computer (a DHCP reservation in your router) so the link keeps working.
 
+## iPhone app
+
+`ios/` is a native iPhone app with no third-party code. It shows the house battery, each car's battery and
+the state of each connection on one screen, and notifies you when a car starts charging.
+
+- **Honest about cars.** A car only counts as connected while the bridge reports a Bluetooth signal for it.
+  Otherwise the app shows the car's last real reading with its date, and says the charging state is
+  unknown. The bridge remembers old values and its "BLE Connection" switch stays on with no car nearby, so
+  neither of those counts.
+- **Quick to open.** The last reading is on screen from the first frame, marked with its age. The app then
+  tries your home and Tailscale addresses together and uses whichever answers first. `GET /api/mobile` is
+  about 650 bytes, answered from memory.
+- **Charging notifications.** A push needs a real link, the car's state reading `Charging` twice in a row,
+  and the car having been off charge for `CHARGE_PUSH_COOLDOWN_MIN`. That keeps the night top-off's repeated
+  restarts near its SOC cap from buzzing your phone. If Apple can't deliver a push, it goes to ntfy when
+  `NOTIFY=1`. Other messages stay on ntfy.
+
+The bridge talks to one car at a time, so a car that starts charging while the bridge is on the other one
+isn't seen until the bridge switches: up to about 4 minutes by day and 10 in [quiet mode](#quiet-mode-evening-and-overnight).
+
+### Install with a free Apple ID
+
+This needs Xcode but no paid membership. The app shows everything, but charging notifications keep going
+to ntfy, because Apple only lets paid accounts send pushes. A free install stops opening after 7 days.
+Run the install again to renew it, and your settings are kept.
+
+1. Open Xcode once to accept its license. Then go to **Settings > Accounts > +** and sign in with your
+   Apple ID. It shows up as a "Personal Team".
+2. Plug in the iPhone, unlock it and tap **Trust**. Turn on **Settings > Privacy & Security > Developer
+   Mode**, which restarts the phone.
+3. On the Mac, run `node scripts/ios-install.js`. It builds the app, installs it and opens it.
+   - The first time, iOS asks you to trust your Apple ID: **Settings > General > VPN & Device Management**.
+   - If Xcode has more than one team, pick one with `TEAM=...`.
+   - If Apple says the app id is taken, set a different `BUNDLE_ID=...`.
+4. On the Mac, run `node scripts/ios-link.js`. It copies a setup link to the clipboard. In the app, tap
+   **Paste**. Allow local network access when asked.
+
+### Turn on iPhone notifications (paid membership)
+
+1. At [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list), create a key with
+   **Apple Push Notifications service** turned on and download the `.p8` file to `data/apns/`.
+2. In `.env`, set these, then restart the server:
+   ```
+   APNS_KEY_FILE=data/apns/AuthKey_XXXXXXXXXX.p8
+   APNS_KEY_ID=XXXXXXXXXX
+   APNS_TEAM_ID=your team id
+   APNS_TOPIC=com.lexco.solarev
+   ```
+   `APNS_TOPIC` must match the app's bundle id, including any `BUNDLE_ID` you installed with.
+3. Reinstall with `PUSH=1 node scripts/ios-install.js`, then allow notifications when the app asks. From
+   Xcode instead, set `SOLAREV_PUSH` to `YES` in the target's build settings.
+4. In the app's Settings, tap **Send a test notification**.
+
+To use it away from home, install [Tailscale](https://tailscale.com) on the Mac and the iPhone, and turn on
+**VPN On Demand** in the iPhone's Tailscale app. `node scripts/ios-link.js` includes the Tailscale address when it
+finds one. Nothing needs to be opened to the internet.
+
 ## Settings (`.env`)
 
 | Key | Default | Meaning |
@@ -266,6 +323,8 @@ Use a fixed IP for the computer (a DHCP reservation in your router) so the link 
 | `TESLA_BLE_HOST` / `_USER` / `_PASSWORD` | | Bridge address and web login |
 | `HOST` | 127.0.0.1 | 0.0.0.0 = reachable from the tablet / phone app on your LAN |
 | `APP_KEY` | | Key other devices need once for the app (see [Tablet and phone app](#tablet-and-phone-app)) |
+| `APNS_KEY_FILE`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC` | | Apple push key for the [iPhone app](#iphone-app). Blank = no iPhone pushes |
+| `CHARGE_PUSH_COOLDOWN_MIN` | 60 | Minutes a car must be off charge before another "charging started" push (unplugging resets it) |
 | `NTFY_TOPIC` | auto | Push topic (generated if blank; setting it also turns on `NOTIFY`) |
 
 ## Data sources
