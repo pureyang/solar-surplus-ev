@@ -19,15 +19,17 @@ enum Push {
     /// SOLAREV_PUSH in the Xcode project, copied into Info.plist. Pushes need a paid Apple Developer membership.
     static let inThisBuild = Bundle.main.object(forInfoDictionaryKey: "SolarEVPush") as? String == "YES"
 
-    /// Xcode builds get tokens for Apple's sandbox server, TestFlight builds for production. The server also
-    /// corrects this on its own if it's wrong.
-    static var environment: String {
-        #if DEBUG
-        "sandbox"
-        #else
-        "production"
-        #endif
-    }
+    /// Which Apple push server issued this phone's token. Installs from the Mac carry a provisioning profile
+    /// that says "development" (sandbox), whatever the build configuration. TestFlight and App Store builds
+    /// carry none and use production. The server also corrects this on its own if it's wrong.
+    static let environment: String = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .isoLatin1),
+              let key = text.range(of: "<key>aps-environment</key>") else { return "production" }
+        let value = text[key.upperBound...].prefix(80)
+        return value.contains("<string>development</string>") ? "sandbox" : "production"
+    }()
 
     static var deviceName: String {
         #if os(iOS)

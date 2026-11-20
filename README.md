@@ -267,6 +267,8 @@ Run the install again to renew it, and your settings are kept.
    - The first time, iOS asks you to trust your Apple ID: **Settings > General > VPN & Device Management**.
    - If Xcode has more than one team, pick one with `TEAM=...`.
    - If Apple says the app id is taken, set a different `BUNDLE_ID=...`.
+   - If Apple says the team "has reached the maximum number of registered iPhone devices", a free Apple ID
+     can't clear that. Use another Apple ID, or the paid membership below, which starts with a fresh list.
 4. On the Mac, run `node scripts/ios-link.js`. It copies a setup link to the clipboard. In the app, tap
    **Paste**. Allow local network access when asked.
 

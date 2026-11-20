@@ -45,9 +45,12 @@ function pickPhone() {
   return phone;
 }
 
-// The teams Xcode knows from Settings > Accounts.
+// TEAM=, else the team chosen in Xcode's Signing & Capabilities, else the one team Xcode lists under Accounts.
 function pickTeam() {
   if (process.env.TEAM) return process.env.TEAM;
+  const pbx = fs.readFileSync(path.join(root, 'ios', 'SolarEV.xcodeproj', 'project.pbxproj'), 'utf8');
+  const chosen = pbx.match(/DEVELOPMENT_TEAM = ([A-Z0-9]{10});/)?.[1];
+  if (chosen) return chosen;
   const plist = tmpFile('xcode.plist');
   let teams = [];
   try {
@@ -56,10 +59,15 @@ function pickTeam() {
     teams = Object.values(JSON.parse(json)).flat();
   } catch {}
   fs.rmSync(path.dirname(plist), { recursive: true, force: true });
-  const usable = push ? teams.filter((t) => !t.isFreeProvisioningTeam) : teams;
+  // A paid team wins: installs last a year, its device list is fresh, and only it can push.
+  const paid = teams.filter((t) => !t.isFreeProvisioningTeam);
+  const usable = paid.length || push ? paid : teams;
   const ids = [...new Set(usable.map((t) => t.teamID))];
   if (ids.length === 1) return ids[0];
-  if (!teams.length) fail('Sign in to Xcode first: Xcode > Settings > Accounts > + > Apple Account.');
+  if (!teams.length) {
+    fail('Pick a team once: open ios/SolarEV.xcodeproj in Xcode, select the SolarEV target, and under Signing & Capabilities\n'
+      + 'choose your team. No team listed? Sign in first at Xcode > Settings > Accounts > + > Apple Account.');
+  }
   if (!ids.length) fail('Notifications need a paid Apple Developer team, and Xcode only has a free one. Run without PUSH=1.');
   fail(`Xcode has several teams. Pick one with TEAM=...:\n${usable.map((t) => `  TEAM=${t.teamID}  ${t.teamName}`).join('\n')}`);
 }
