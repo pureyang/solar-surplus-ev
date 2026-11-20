@@ -263,7 +263,8 @@ const sameKey = (k) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 function allowed(req, res, url) {
-  if (LOOPBACK.has(req.socket.remoteAddress)) return true;
+  // A local proxy (tailscale serve) also arrives from loopback; it adds X-Forwarded-For, so those need the key too.
+  if (LOOPBACK.has(req.socket.remoteAddress) && !req.headers['x-forwarded-for']) return true;
   if (!config.appKey) return false;
   const q = url.searchParams.get('key');
   const c = /(?:^|;\s*)sse_key=([^;]+)/.exec(req.headers.cookie || '')?.[1];
