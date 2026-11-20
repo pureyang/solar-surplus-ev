@@ -18,6 +18,7 @@ import { db, writeNotification, writeControlLog } from './db.js';
 import { notify } from './notify.js';
 import { log } from './log.js';
 import { nightAsk } from './nightRetry.js';
+import { nightTarget } from './nightTarget.js';
 
 const FULL_SOC = 95;
 const MARGIN_W = 150;      // headroom so the car isn't the reason for a small import
@@ -151,10 +152,10 @@ export class Controller {
     if (night) {
       const info = { mode: 'night top-off', excessW, exportW, importW, soc: r.soc };
       const why = `Night top-off: off-peak until ${night.until}`;
-      const target = this.nightTarget(now, car);
+      const { target, why: targetWhy } = this.nightTarget(now, car);
       if (car.battery != null && target != null && car.battery >= target) {
         if (car.charging && this.ownSession) return this.command(now, car, 0, `Night top-off: car reached ${target}%`, info);
-        return set(`Night top-off: car at ${target}% (${target === car.limit ? 'its limit' : 'winter cap'})`, round(info));
+        return set(`Night top-off: car at ${target}% (${targetWhy})`, round(info));
       }
       // Raise once to max; if the car/charger caps lower, don't re-send every tick. A start or raise the car
       // doesn't take is asked again after 15, 30, then every 60 min, not every tick.
@@ -278,13 +279,11 @@ export class Controller {
     return inside ? { until: clock(Math.floor(d.setHours(Math.floor(b / 60), b % 60, 0, 0) / 1000)) } : null;
   }
 
-  // Night top-off stop point: the car's limit, capped at NIGHT_CHARGE_WINTER_MAX in PG&E winter (Oct-May).
+  // Night top-off stop point (src/nightTarget.js): per-car NIGHT_CHARGE_CARn_MAX, else the winter cap, never above
+  // the car's own limit.
   nightTarget(now, car) {
-    const month = new Date(now * 1000).getMonth() + 1;
-    const cap = config.control.night.winterMax;
-    const winter = month >= 10 || month <= 5;
-    if (!winter || !cap) return car.limit ?? null;
-    return car.limit != null ? Math.min(car.limit, cap) : cap;
+    const carMax = config.tesla.cars.find((c) => c.key === car.car)?.nightMax ?? 0;
+    return nightTarget({ month: new Date(now * 1000).getMonth() + 1, limit: car.limit, carMax, winterMax: config.control.night.winterMax });
   }
 
   // Cloudy = solar running well below what the model expected, or heavy forecast cloud this hour.

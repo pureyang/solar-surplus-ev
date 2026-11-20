@@ -64,8 +64,9 @@ export const config = {
     password: env.TESLA_BLE_PASSWORD || '',
     // One bridge, up to two cars ("Active Car" on the bridge). Car 2 is on when TESLA_CAR2_NAME is set.
     cars: [
-      { key: 'Car 1', name: env.TESLA_CAR1_NAME || 'Car 1', kwh: Number(env.EV_CAR_KWH || 75) },
-      ...(env.TESLA_CAR2_NAME ? [{ key: 'Car 2', name: env.TESLA_CAR2_NAME, kwh: Number(env.EV_CAR2_KWH || env.EV_CAR_KWH || 75) }] : []),
+      // nightMax: NIGHT_CHARGE_CARn_MAX, this car's night top-off stop point all year (0 = use the winter rule).
+      { key: 'Car 1', name: env.TESLA_CAR1_NAME || 'Car 1', kwh: Number(env.EV_CAR_KWH || 75), nightMax: Number(env.NIGHT_CHARGE_CAR1_MAX || 0) },
+      ...(env.TESLA_CAR2_NAME ? [{ key: 'Car 2', name: env.TESLA_CAR2_NAME, kwh: Number(env.EV_CAR2_KWH || env.EV_CAR_KWH || 75), nightMax: Number(env.NIGHT_CHARGE_CAR2_MAX || 0) }] : []),
     ],
   },
   // Automatic EV control over BLE (src/controller.js). On by default when the bridge is configured.
